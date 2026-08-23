@@ -13,6 +13,7 @@ This library provides a deterministic and highly customizable search experience 
 - Lemma & Root matching (via morphology and word maps)
 - Regular Expression search with ReDoS safety validation
 - Advanced Fuzzy fallback
+- Subject-based thematic search (`loadSubjectData` + `{ subject: true }`)
 - Independent multi-term search (`search()` with an array of terms) with score/coverage/frequency ranking
 - Computed highlight ranges (UI-agnostic)
 
@@ -30,6 +31,7 @@ This library provides a deterministic and highly customizable search experience 
 
 - [CLI](./guides/cli.md)
 - [Search Syntax & Scoring](./guides/search-syntax.md)
+- [Subject & Multi-Word Search](./guides/subjects-and-multiword.md)
 - [Advanced Configuration](./guides/configuration.md)
 - [Examples & Integrations](./guides/examples.md)
 - [English-Arabic Search](./guides/english-arabic-search.md)

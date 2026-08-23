@@ -805,6 +805,8 @@ const response = search(
 // response.results => all returned verses match BOTH tokens (AND logic)
 ```
 
+For independent multi-term search (each term searched separately, results merged and ranked), pass an array of strings. See the [Subject & Multi-Word Search guide](docs/guides/subjects-and-multiword.md) for full examples including AI-pipeline patterns and `rankBy` modes.
+
 ## Caching with LRUCache
 
 `quran-search-engine` ships a generic `LRUCache<K, V>` class that you can pass into `search()` to avoid recomputing identical queries. The cache uses JavaScript `Map` internally for **O(1)** `get`, `set`, and eviction.
