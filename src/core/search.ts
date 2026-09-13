@@ -161,7 +161,7 @@ export const search = <TVerse extends VerseInput>(
     : null;
 
   // Remove boolean operators from query to extract clean search terms
-  // Example: "+الله | الرحمن -الجحيم" → "الله الرحمن الجحيم"
+  // Example: "+الله | الرحمن -الرحيم" → "الله الرحمن الرحيم"
   const operatorFreeQuery = clearBooleanOperators(query);
 
   // 4. Setup phase: Tokenize and handle phonetic translation
@@ -248,7 +248,10 @@ export const search = <TVerse extends VerseInput>(
 
   // 6. Boolean filtering (if boolean operators were present in query)
   // First, combine all search results from different layers
-  const allMatches = [...simpleMatches, ...advancedMatches, ...semanticMatches];
+  const combinedMatches = [...simpleMatches, ...advancedMatches, ...semanticMatches];
+  const versesArrOfArr: [number, TVerse][] = combinedMatches.map((verse) => [verse.gid, verse]);
+  const versesArrOfObj = Array.from(new Map(versesArrOfArr).values());
+  const allMatches = filterVerses(versesArrOfObj, options.suraId, options.juzId, options.suraName);
 
   // Then, if boolean query exists, filter combined results based on boolean logic
   // This allows queries like "+الله -الرحمن الرحيم | العليم" to:
