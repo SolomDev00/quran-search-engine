@@ -506,6 +506,6 @@ export const loadSubjectData = async (): Promise<Map<string, string[]>> => {
 
     return buildSubjectMap(subjectData);
   } catch (error) {
-    rethrowLoadError(filePath, error);
+    return rethrowLoadError(filePath, error);
   }
 };

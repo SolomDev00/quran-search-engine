@@ -13,6 +13,7 @@ import { performSemanticSearch } from './layers/semantic-search';
 import { performSubjectSearch } from './layers/subject-search';
 import { searchManyImpl } from './layers/search-many';
 import { computeScore } from '../utils/scoring';
+import { buildSearchCounts } from '../utils/search-counts';
 
 import type {
   AdvancedSearchOptions,
@@ -356,20 +357,7 @@ export function search<TVerse extends VerseInput>(
   const totalResults = combined.length;
   const totalPages = Math.ceil(totalResults / limit);
 
-  const counts: SearchCounts = {
-    simple: combined.filter((v) => v.matchType === 'exact').length,
-    lemma: combined.filter((v) => v.matchType === 'lemma').length,
-    root: combined.filter((v) => v.matchType === 'root').length,
-    // BUG: `fuzzy` also counts verses whose matchType is 'none', so it over-reports fuzzy
-    // matches and no field reports unscored ones. Consumers displaying a per-type breakdown
-    // (the CLI does) therefore attribute 'none' results to fuzzy matching. Tracked in #102.
-    fuzzy: combined.filter((v) => v.matchType === 'none' || v.matchType === 'fuzzy').length,
-    semantic: combined.filter((v) => v.matchType === 'semantic').length,
-    subject: combined.filter((v) => v.matchType === 'subject').length,
-    regex: 0,
-    range: 0,
-    total: combined.length,
-  };
+  const counts: SearchCounts = buildSearchCounts(combined);
 
   const response: SearchResponse<TVerse> = {
     results,

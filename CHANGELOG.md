@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Loader corrupted-JSON test**: rewrote the test to simulate corrupted data files by mocking
+  the data modules instead of copying ~8.6 MB of real data (the loaders ignore file-path
+  arguments by design — they use static bundler-analyzable JSON imports). The test now asserts
+  `DataParseError`/`DataSchemaInvalidError` precisely and runs in milliseconds instead of
+  timing out.
+- **Search counts**: `counts.fuzzy` no longer includes unscored matches (`matchType: 'none'`) —
+  it counts genuine fuzzy matches only, in both `search()` and multi-term search. Unscored
+  matches are still reported in `counts.total`. The per-type breakdown in the CLI footer
+  inherits the corrected grouping.
+
 ### Added
 
 - **CLI**: New `quran-search-engine` command for searching the Quran from a terminal, runnable via
@@ -16,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Multi-term search**: `search()` now also accepts an array of terms (`search(['محمد', 'يونس'], ...)`),
   searching each independently and merging results by `gid` with score/coverage/frequency ranking.
   The existing string-query (AND-logic) behavior is unchanged.
+- **CLI multi-term search**: a single argument wrapped in `[ ... ]` (e.g.
+  `quran-search-engine "[محمد, يونس]"`, ASCII or Arabic comma) now runs the array overload above,
+  with a `--rank-by score|coverage|frequency` option and merged-result details (matched-term and
+  hit counts) in the table and `json` output. Bare positional arguments (`quran-search-engine محمد
+  رسول`) instead combine into a single query, identical to quoting them together.
 
 ## [0.3.2]
 
@@ -41,7 +58,8 @@ This release contains breaking changes. Please review the [Migration Guide](./do
 - **Arrays → Maps**: Replaced array-based lookups with Map data structures for O(1) access time
 - **Worker loading**: Simplified worker initialization with improved loading mechanism
 - **File naming convention**: Migrated to kebab-case naming (e.g., `base.error.ts` → `base-error.ts`)
-- **Examples updated**: All example applications (Vite React, Vanilla TypeScript, Node.js) have been updated to reflect API changes
+- **Examples updated**: All example applications (Vite React, Vanilla TypeScript, Node.js) have been updated to reflect
+  API changes
 
 ### Removed
 
@@ -65,18 +83,23 @@ This release contains breaking changes. Please review the [Migration Guide](./do
 
 ### Added
 
-- **Architecture: `core/layers/` folder** — Search logic is now organized into dedicated layer files, each co-located with its own test file:
+- **Architecture: `core/layers/` folder** — Search logic is now organized into dedicated layer files, each co-located
+  with its own test file:
   - `core/layers/simple-search.ts` + `simple-search.test.ts`
   - `core/layers/fuse-search.ts` + `fuse-search.test.ts`
   - `core/layers/linguistic-search.ts`
   - `core/layers/regex-search.ts` + `regex-search.test.ts`
   - `core/layers/semantic-search.ts`
   - `core/layers/phonetic-search.ts` (phonetic utilities promoted to a search layer)
-- **Modular test suite** — Tests are now separated by concern. `search.test.ts` covers integration of the orchestrator; each layer and utility has its own dedicated test file.
-- **Regex Search**: Added optional `isRegex: true` support to `AdvancedSearchOptions` for pattern-based queries, with built-in safety validation for catastrophic backtracking.
+- **Modular test suite** — Tests are now separated by concern. `search.test.ts` covers integration of the orchestrator;
+  each layer and utility has its own dedicated test file.
+- **Regex Search**: Added optional `isRegex: true` support to `AdvancedSearchOptions` for pattern-based queries, with
+  built-in safety validation for catastrophic backtracking.
 - **Documentation**: Comprehensive JSDoc comments for core search utilities in `search.ts`, `highlight.ts` and `tokenization.ts`.
-- **Phonetic Search**: Search for verses using Latin/English transliterations (e.g. "Bismillah"). Includes a fuzzy fallback mechanism (via Fuse.js) to handle typos in phonetic queries.
-- **Range Search**: Queries like `2:255`, `1:1-7`, or `2:` now return verses directly by sura/aya coordinates, bypassing the linguistic search pipeline.
+- **Phonetic Search**: Search for verses using Latin/English transliterations (e.g. "Bismillah"). Includes a fuzzy
+  fallback mechanism (via Fuse.js) to handle typos in phonetic queries.
+- **Range Search**: Queries like `2:255`, `1:1-7`, or `2:` now return verses directly by sura/aya coordinates, bypassing
+  the linguistic search pipeline.
 - **Semantic Search**: Concept-based mapping that links Arabic synonyms and English concepts to their relevant verses.
 - **New exports**: `parseRangeQuery()` and `filterVersesByRange()` utilities for consumers to detect and handle range queries.
 - **New type**: `ParsedRange` type for structured range query representation.
@@ -98,14 +121,19 @@ This release contains breaking changes. Please review the [Migration Guide](./do
 
 ### Changed
 
-- **Architecture: `utils/` reorganization** — Generic utilities (`tokenization.ts`, `lru-cache.ts`, `range-parser.ts`) moved from `core/` to `utils/`, keeping `core/` focused on the search orchestrator and its layers.
-- **TODO comment**: Added a placeholder in `search.ts` for a future English-to-Arabic translation/transliteration feature (alongside the existing phonetic lookup), serving as a reference for implementing that feature.
+- **Architecture: `utils/` reorganization** — Generic utilities (`tokenization.ts`, `lru-cache.ts`, `range-parser.ts`)
+  moved from `core/` to `utils/`, keeping `core/` focused on the search orchestrator and its layers.
+- **TODO comment**: Added a placeholder in `search.ts` for a future English-to-Arabic translation/transliteration
+  feature (alongside the existing phonetic lookup), serving as a reference for implementing that feature.
 
 ### Fixed
 
-- **Search**: Fixed bug in `filterVerses` where falling back to the full dataset occurred when a filter returned no results, ensuring strict filtering behavior.
-- **Search Filter Logic**: Fixed `filterVerses` function to return empty arrays when explicit filters (suraId, juzId, suraName) yield no results instead of falling back to all data.
-- **Regex test**: Fixed `validateRegex` usage in tests — it expects a bare pattern string (e.g. `^الحمد`) not JS regex-literal syntax (`/^الحمد/`).
+- **Search**: Fixed bug in `filterVerses` where falling back to the full dataset occurred when a filter returned no
+  results, ensuring strict filtering behavior.
+- **Search Filter Logic**: Fixed `filterVerses` function to return empty arrays when explicit filters (suraId, juzId,
+  suraName) yield no results instead of falling back to all data.
+- **Regex test**: Fixed `validateRegex` usage in tests — it expects a bare pattern string (e.g. `^الحمد`) not JS
+  regex-literal syntax (`/^الحمد/`).
 
 ## [0.1.5]
 
@@ -125,8 +153,10 @@ This release contains breaking changes. Please review the [Migration Guide](./do
 
 ### Added
 
-- **Vanilla TypeScript Example**: Added a framework-free browser example (`examples/vanilla-ts`) demonstrating plain TypeScript implementation with DOM manipulation
-- **Node.js Example**: Added a server-side command-line example (`examples/nodejs`) showing programmatic usage with detailed console output
+- **Vanilla TypeScript Example**: Added a framework-free browser example (`examples/vanilla-ts`) demonstrating plain
+  TypeScript implementation with DOM manipulation
+- **Node.js Example**: Added a server-side command-line example (`examples/nodejs`) showing programmatic usage with
+  detailed console output
 - **Workspace Configuration**: Updated `pnpm-workspace.yaml` to include all examples in the monorepo
 - **Documentation**: Updated main `README.md` to list and describe all available examples
 
@@ -134,7 +164,8 @@ This release contains breaking changes. Please review the [Migration Guide](./do
 
 ### Added
 
-- **Example Application**: Added a complete React + Vite example in the `examples/vite-react/` directory demonstrating real-time search, highlighting, and pagination
+- **Example Application**: Added a complete React + Vite example in the `examples/vite-react/` directory demonstrating
+  real-time search, highlighting, and pagination
 - **Unit Tests**: Added comprehensive test suite using Vitest covering:
   - Tokenization (Exact, Lemma, Root matching)
   - Search logic (`simpleSearch` and `advancedSearch`)

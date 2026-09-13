@@ -154,7 +154,7 @@ import type { SearchWorkerClient } from 'quran-search-engine';
 The following have been removed in v0.3.x:
 
 | Feature | Removed | Alternative |
-|---------|---------|-------------|
+| --------- | --------- | ------------- |
 | Phonetic Search | `loadPhoneticData()` | Use exact Arabic text search |
 | English-to-Arabic Search | `loadEnglishToArabic()` | Semantic search with English concepts |
 | Lemma Index | `lemma-index.json` | Use semantic search instead |
@@ -166,7 +166,7 @@ The following have been removed in v0.3.x:
 Error files now use kebab-case:
 
 | Old | New |
-|-----|-----|
+| ----- | ----- |
 | `base.error.ts` | `base-error.ts` |
 | `search.error.ts` | `search-error.ts` |
 | `validation.error.ts` | `validation-error.ts` |
@@ -426,4 +426,5 @@ contributions for more themes, synonyms, and Arabic lemmas are welcome.
 
 ## Need Help?
 
-If you encounter issues during migration, please [open an issue](https://github.com/adelpro/quran-search-engine/issues) or reach out to the community.
+If you encounter issues during migration, please [open an issue](https://github.com/adelpro/quran-search-engine/issues)
+or reach out to the community.
