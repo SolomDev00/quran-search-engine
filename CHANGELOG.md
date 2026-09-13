@@ -33,6 +33,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a `--rank-by score|coverage|frequency` option and merged-result details (matched-term and
   hit counts) in the table and `json` output. Bare positional arguments (`quran-search-engine محمد
   رسول`) instead combine into a single query, identical to quoting them together.
+- **Subject-based (thematic) search**: `{ subject: true }` maps an English concept word or phrase
+  (`"climate"`, `"eternal life"`) to a curated set of Arabic words grouped by Islamic theme and
+  searches the Quran for them. New `loadSubjectData()` export builds the map from
+  `src/data/subjects.json`; pass it as `subjectMap` in the search context and, optionally, as the
+  fourth argument to `buildInvertedIndex()` to get a pre-built `subjectIndex`. Matches are tagged
+  `matchType: 'subject'` and tallied in `counts.subject`. The shipped dataset seeds 20 themes and
+  is meant to be expanded by contributors.
+
+### Changed
+
+- **`SearchCounts.subject`** is a required field, and **`MatchType`** gains a `'subject'` member.
+  Code that constructs a `SearchCounts` object literal or exhaustively switches on `MatchType`
+  needs updating; see the [Migration Guide](./docs/migration-guide.md).
 
 ## [0.3.2]
 

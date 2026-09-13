@@ -315,6 +315,10 @@ const response = search(
 // → returns verses about مطر، رياح، عاصفة، سحاب...
 ```
 
+> **Note:** `src/data/subjects.json` is a seed dataset. It covers 20 themes with a handful of
+> English synonyms and Arabic words each — enough to demonstrate thematic search, not enough to
+> cover the Quran's themes. Contributions that add themes, synonyms, or Arabic words are welcome.
+
 #### `buildInvertedIndex(morphologyMap, quranData, semanticMap?, subjectMap?)`
 
 Builds in-memory inverted indices from the morphology map and verse data in a single pass.
