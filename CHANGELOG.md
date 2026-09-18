@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Subject search precision**: subject words no longer match by bare substring. A word now
+  matches a verse only when it shares the verse's root, is one of its lemmas, or appears as a
+  whole token once Arabic clitics are attached (`الرياح` for `رياح`). Substring matching pulled
+  `سماء` into every `ماء` search and `كتاب`/`عذاب` into every `اب` search — roughly a fifth of
+  the Quran arrived in the `family` subject alone.
+- **Subject index build cost**: `buildInvertedIndex` no longer re-scans all ~6.2k verses per
+  subject key. It reuses the root, lemma and word indices it has already built, cutting the
+  `subjectIndex` step from ~2.8s to ~0.36s on the shipped dataset.
 - **Loader corrupted-JSON test**: rewrote the test to simulate corrupted data files by mocking
   the data modules instead of copying ~8.6 MB of real data (the loaders ignore file-path
   arguments by design — they use static bundler-analyzable JSON imports). The test now asserts
@@ -32,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `quran-search-engine "[محمد, يونس]"`, ASCII or Arabic comma) now runs the array overload above,
   with a `--rank-by score|coverage|frequency` option and merged-result details (matched-term and
   hit counts) in the table and `json` output. Bare positional arguments (`quran-search-engine محمد
-  رسول`) instead combine into a single query, identical to quoting them together.
+رسول`) instead combine into a single query, identical to quoting them together.
 - **Subject-based (thematic) search**: `{ subject: true }` maps an English concept word or phrase
   (`"climate"`, `"eternal life"`) to a curated set of Arabic words grouped by Islamic theme and
   searches the Quran for them. New `loadSubjectData()` export builds the map from
@@ -43,6 +51,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`buildInvertedIndex`** accepts an optional fifth argument, `wordMap`. Supplying it lets each
+  subject word resolve through its root, so `مطر` also covers `وأمطرنا`. The argument is optional
+  and existing calls keep working; without it, subject words resolve by lemma and clitic form only.
+- **`src/data/subjects.json`** entries are now written in their base form (`مطر`, not `أمطار`),
+  since the shared root already covers the derived forms. 40 entries that matched no verse at all
+  — `أمطار`, `عواصف`, `معركة`, `سلاح` and others that simply do not occur in the Quran — were
+  replaced with attested forms of the same root or dropped, and `قوم` (`family`) and `عالم`
+  (`creation`) were removed as thematic mismatches. 301 Arabic entries → 264, none of them dead.
 - **`SearchCounts.subject`** is a required field, and **`MatchType`** gains a `'subject'` member.
   Code that constructs a `SearchCounts` object literal or exhaustively switches on `MatchType`
   needs updating; see the [Migration Guide](./docs/migration-guide.md).

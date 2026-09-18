@@ -1,5 +1,6 @@
 import type { MorphologyAya, WordMap, QuranText, InvertedIndex, SubjectIndex } from '../types';
 import { normalizeArabic } from './normalization';
+import { expandAffixVariants } from './arabic-affixes';
 import { DataFileNotFoundError, DataParseError, DataSchemaInvalidError } from '../errors';
 
 const rethrowLoadError = (filePath: string, error: unknown): never => {
@@ -240,6 +241,11 @@ export const loadQuranData = async (): Promise<Map<number, QuranText>> => {
  * Note: Lemmas and roots in morphology.json are already normalized
  *
  * @param morphologyMap The morphology map (from loadMorphology).
+ * @param quranData The Quran text map (from loadQuranData).
+ * @param semanticMap Optional semantic map; supplying it builds `semanticIndex`.
+ * @param subjectMap Optional subject map (from loadSubjectData); supplying it builds `subjectIndex`.
+ * @param wordMap Optional word map (from loadWordMap). Lets subject words resolve through their
+ *   root, so `مطر` also covers `وأمطرنا`; without it subjects fall back to lemma and clitic matching.
  * @returns An InvertedIndex containing both lemmaIndex and rootIndex.
  */
 export const buildInvertedIndex = (
@@ -247,6 +253,7 @@ export const buildInvertedIndex = (
   quranData: Map<number, QuranText>,
   semanticMap?: Map<string, string[]>,
   subjectMap?: Map<string, string[]>,
+  wordMap?: WordMap,
 ): InvertedIndex => {
   const lemmaIndex = new Map<string, Set<number>>();
   const rootIndex = new Map<string, Set<number>>();
@@ -318,25 +325,22 @@ export const buildInvertedIndex = (
   }
 
   // Build subjectIndex: each subject key → union of GIDs for all its Arabic words.
-  // Uses substring matching (includes) so prefixed forms like وامطرنا match root مطر,
-  // keeping parity with the scan path in performSubjectSearch.
-  // Verses are normalized once outside the key loop to avoid redundant work.
+  //
+  // Resolution reuses the indices built above (root → lemma → clitic variant), exactly as
+  // performSubjectSearch does, so a subject's GID set is the union of its words' GID sets by
+  // construction. Earlier revisions re-scanned all ~6.2k verses per subject key with substring
+  // matching, which cost seconds and matched unrelated stems.
   if (subjectMap && subjectIndex) {
-    const normalizedVerses = new Map<number, string>();
-    for (const verse of quranData.values()) {
-      normalizedVerses.set(verse.gid, normalizeArabic(verse.standard));
-    }
-
     for (const [key, words] of subjectMap.entries()) {
-      const normalizedWords = words.map((w) => normalizeArabic(w)).filter(Boolean);
-      if (normalizedWords.length === 0) continue;
       const gids = new Set<number>();
-      for (const [gid, normalizedVerse] of normalizedVerses) {
-        for (const word of normalizedWords) {
-          if (normalizedVerse.includes(word)) {
-            gids.add(gid);
-            break;
-          }
+      for (const rawWord of words) {
+        const word = normalizeArabic(rawWord);
+        if (!word) continue;
+        const root = wordMap?.get(word)?.root;
+        if (root) rootIndex.get(root)?.forEach((gid) => gids.add(gid));
+        lemmaIndex.get(word)?.forEach((gid) => gids.add(gid));
+        for (const variant of expandAffixVariants(word)) {
+          wordIndex.get(variant)?.forEach((gid) => gids.add(gid));
         }
       }
       if (gids.size > 0) {

@@ -41,9 +41,14 @@ export type SearchOptions = AdvancedSearchOptions;
   shapes are configured.
 - **Subject Search:** Enable `{ subject: true }` to perform thematic search. Requires passing
   `subjectMap` (loaded via `loadSubjectData()`) in the search context. Maps English concept
-  words (e.g. `"climate"`, `"worship"`) to curated Arabic lemmas grouped by Islamic theme,
-  then searches for those lemmas in the Quran. The initial `src/data/subjects.json` seed
-  covers 20 themes and is designed to be expanded by contributors over time.
+  words (e.g. `"climate"`, `"worship"`) to curated Arabic words grouped by Islamic theme,
+  then searches for those words in the Quran. A word matches a verse when it shares the
+  verse's root, is one of its lemmas, or appears as a whole token once Arabic clitics are
+  attached (`الرياح` for `رياح`) — never by bare substring, which would match `ماء`
+  inside `سماء`. Root resolution requires `wordMap`, so pass it to `buildInvertedIndex` as
+  the fifth argument. The initial `src/data/subjects.json` seed covers 20 themes and is
+  designed to be expanded by contributors over time; write new entries in their base form
+  (`مطر`, not `أمطار`), since the root already covers the derived forms.
 - **Filtering Options:** Narrow searches spatially via explicit `{ suraId: 2, juzId: 3 }` etc.
 
 ## `PaginationOptions`

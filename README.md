@@ -305,7 +305,13 @@ Pass `subjectMap` to `buildInvertedIndex` and to the `search` context, then set 
 import { loadSubjectData, buildInvertedIndex, search } from 'quran-search-engine';
 
 const subjectMap = await loadSubjectData();
-const invertedIndex = buildInvertedIndex(morphologyMap, quranData, semanticMap, subjectMap);
+const invertedIndex = buildInvertedIndex(
+  morphologyMap,
+  quranData,
+  semanticMap,
+  subjectMap,
+  wordMap,
+);
 
 const response = search(
   'climate',
@@ -315,11 +321,24 @@ const response = search(
 // → returns verses about مطر، رياح، عاصفة، سحاب...
 ```
 
+**How a subject word matches.** A word matches a verse when it shares the verse's root, is one
+of the verse's lemmas, or appears as a whole token once Arabic clitics are attached (`الرياح`
+for `رياح`). Root resolution is what lets the bare `مطر` also reach `وأمطرنا`, and it needs
+`wordMap` — pass it to `buildInvertedIndex` as shown above, otherwise subjects fall back to lemma
+and clitic matching only.
+
+Substring containment is deliberately _not_ a match: it would pull `سماء` into every `ماء`
+search and `كتاب` into every `اب` search.
+
+**Write subject words in their base form.** `مطر` covers `أمطار`, `وأمطرنا` and `مطرًا`
+through the shared root, so listing the plural as well adds nothing — and `أمطار` does not occur
+in the Quran at all.
+
 > **Note:** `src/data/subjects.json` is a seed dataset. It covers 20 themes with a handful of
 > English synonyms and Arabic words each — enough to demonstrate thematic search, not enough to
 > cover the Quran's themes. Contributions that add themes, synonyms, or Arabic words are welcome.
 
-#### `buildInvertedIndex(morphologyMap, quranData, semanticMap?, subjectMap?)`
+#### `buildInvertedIndex(morphologyMap, quranData, semanticMap?, subjectMap?, wordMap?)`
 
 Builds in-memory inverted indices from the morphology map and verse data in a single pass.
 Produces indices for lemma, root, word, semantic concepts, and (optionally) subject themes.
@@ -329,6 +348,10 @@ Produces indices for lemma, root, word, semantic concepts, and (optionally) subj
 - `wordIndex`: normalized word → Set of verse GIDs
 - `semanticIndex`: semantic concept → Set of verse GIDs (when `semanticMap` is provided)
 - `subjectIndex`: subject key → Set of verse GIDs (when `subjectMap` is provided)
+
+`wordMap` is optional and only affects `subjectIndex`: it lets each subject word resolve through
+its root, so `مطر` also covers `وأمطرنا`. Omit it and subject words resolve by lemma and clitic
+form only.
 
 This converts lemma/root lookups during search from **O(n)** linear scans to **O(1)** Map lookups.
 
@@ -355,7 +378,13 @@ const [quranData, morphologyMap, wordMap, semanticMap, subjectMap] = await Promi
 ]);
 
 // Build once — O(n) one-time cost
-const invertedIndex: InvertedIndex = buildInvertedIndex(morphologyMap, quranData, semanticMap, subjectMap);
+const invertedIndex: InvertedIndex = buildInvertedIndex(
+  morphologyMap,
+  quranData,
+  semanticMap,
+  subjectMap,
+  wordMap,
+);
 
 // Pass to every search call via context — O(1) lookups
 const result = search(
@@ -1059,8 +1088,15 @@ Overall “best” match class for a verse:
 
 ```ts
 export type MatchType =
-  | 'exact' | 'lemma' | 'root' | 'fuzzy' | 'range'
-  | 'none' | 'semantic' | 'subject' | 'regex';
+  | 'exact'
+  | 'lemma'
+  | 'root'
+  | 'fuzzy'
+  | 'range'
+  | 'none'
+  | 'semantic'
+  | 'subject'
+  | 'regex';
 ```
 
 ### `ScoredQuranText`

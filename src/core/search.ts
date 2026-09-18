@@ -308,6 +308,8 @@ export function search<TVerse extends VerseInput>(
     subjectMap,
     operatorFreeQuery,
     invertedIndex,
+    wordMap,
+    morphologyMap,
   );
 
   // 6. Boolean filtering (if boolean operators were present in query)

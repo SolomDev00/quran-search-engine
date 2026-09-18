@@ -71,6 +71,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
           quranData,
           semanticMap ?? undefined,
           subjectMap ?? undefined,
+          wordMap ?? undefined,
         );
 
         postTyped({

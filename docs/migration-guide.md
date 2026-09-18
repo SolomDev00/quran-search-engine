@@ -88,7 +88,7 @@ import { buildInvertedIndex, loadSemanticData, loadSubjectData } from 'quran-sea
 
 const semanticMap = await loadSemanticData();
 const subjectMap = await loadSubjectData(); // v0.4.0+
-const invertedIndex = buildInvertedIndex(morphologyMap, quranData, semanticMap, subjectMap);
+const invertedIndex = buildInvertedIndex(morphologyMap, quranData, semanticMap, subjectMap, wordMap);
 ```
 
 ### 4. Data Loading Changes
@@ -203,7 +203,7 @@ setSemanticMap(semantic);
 
 // Build inverted index
 const subjectMap = await loadSubjectData();
-const index = buildInvertedIndex(morphology, data, semantic, subjectMap);
+const index = buildInvertedIndex(morphology, data, semantic, subjectMap, wordMap);
 setInvertedIndex(index);
 ```
 
@@ -285,7 +285,7 @@ const [indexBuildTime, setIndexBuildTime] = useState<number | null>(null);
 
 const buildStart = performance.now();
 const subjectMap = await loadSubjectData();
-const index = buildInvertedIndex(morphologyMap, quranData, semanticMap, subjectMap);
+const index = buildInvertedIndex(morphologyMap, quranData, semanticMap, subjectMap, wordMap);
 const buildMs = performance.now() - buildStart;
 
 setIndexStats({
@@ -373,7 +373,7 @@ useEffect(() => {
     setWordMap(dictionary);
     setSemanticMap(semantic);
 
-    const index = buildInvertedIndex(morphology, data, semantic, subject);
+    const index = buildInvertedIndex(morphology, data, semantic, subject, wordMap);
     setInvertedIndex(index);
   }
   init();
@@ -408,7 +408,7 @@ import { loadSubjectData, buildInvertedIndex, search } from 'quran-search-engine
 
 // Load alongside other data
 const subjectMap = await loadSubjectData();
-const index = buildInvertedIndex(morphologyMap, quranData, semanticMap, subjectMap);
+const index = buildInvertedIndex(morphologyMap, quranData, semanticMap, subjectMap, wordMap);
 
 // Enable subject search
 search(

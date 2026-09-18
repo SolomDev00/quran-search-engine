@@ -50,8 +50,24 @@ const mockQuranData: QuranText[] = [
 ];
 
 const mockQuranDataMap = new Map(mockQuranData.map((v) => [v.gid, v]));
-const mockMorphologyMap = new Map<number, MorphologyAya>();
-const mockWordMap = new Map<string, { lemma?: string; root?: string }>();
+
+// Subject matching resolves through roots and lemmas, so the fixtures carry the same shape
+// of morphology the real data does. gid 4 is the interesting one: its only rain token is the
+// prefixed verb وامطرنا, reachable from the bare word مطر solely through the shared root.
+const mockMorphologyMap = new Map<number, MorphologyAya>([
+  [1, { gid: 1, lemmas: ['سماء', 'ماء'], roots: ['س-م-و', 'م-و-ه'] }],
+  [2, { gid: 2, lemmas: ['ريح'], roots: ['ر-و-ح'] }],
+  [3, { gid: 3, lemmas: ['سماء', 'ارض'], roots: ['س-م-و', 'ا-ر-ض'] }],
+  [4, { gid: 4, lemmas: ['مطر'], roots: ['م-ط-ر'] }],
+]);
+
+const mockWordMap = new Map<string, { lemma?: string; root?: string }>([
+  ['ماء', { lemma: 'ماء', root: 'م-و-ه' }],
+  ['رياح', { lemma: 'ريح', root: 'ر-و-ح' }],
+  ['ريح', { lemma: 'ريح', root: 'ر-و-ح' }],
+  ['مطر', { lemma: 'مطر', root: 'م-ط-ر' }],
+  ['سحاب', { lemma: 'سحاب', root: 'س-ح-ب' }],
+]);
 
 // Subject map: "weather" → Arabic weather-related words
 const mockSubjectMap = new Map<string, string[]>([
@@ -167,9 +183,9 @@ describe('Subject Search', () => {
 });
 
 describe('Subject Search — indexed/scan parity', () => {
-  // gid 4 carries the prefixed form وامطرنا, which contains the bare subject word مطر
-  // but is a different whitespace-delimited token. It is the case where an exact
-  // wordIndex lookup and a substring scan used to disagree.
+  // gid 4 carries the prefixed form وامطرنا — a different whitespace-delimited token than the
+  // bare subject word مطر, and reachable only through the root they share. It is the case
+  // where an exact wordIndex lookup and a substring scan used to disagree.
   const parityVerse: QuranText = {
     gid: 4,
     uthmani: 'وَأَمْطَرْنَا عَلَيْهِم مَّطَرًا',
@@ -191,6 +207,7 @@ describe('Subject Search — indexed/scan parity', () => {
     parityData,
     undefined,
     mockSubjectMap,
+    mockWordMap,
   );
 
   const gidsFor = (query: string, withIndex: boolean): number[] =>
@@ -227,6 +244,8 @@ describe('Subject Search — indexed/scan parity', () => {
       mockSubjectMap,
       query,
       withIndex ? invertedIndex : undefined,
+      mockWordMap,
+      mockMorphologyMap,
     )
       .map((r) => r.gid)
       .sort((a, b) => a - b);
@@ -247,5 +266,58 @@ describe('Subject Search — indexed/scan parity', () => {
   it('resolves a subject whose words only appear in prefixed form on both paths', () => {
     expect(gidsFor('rain', false)).toContain(4);
     expect(gidsFor('rain', true)).toContain(4);
+  });
+});
+
+describe('Subject Search — stem precision', () => {
+  // Substring containment used to be the matching rule, which meant a subject word matched
+  // anywhere inside a longer, unrelated stem. These are the cases that regressed worst.
+  it('does not match ماء inside السماء', () => {
+    const gids = performSubjectSearch(
+      'rain',
+      mockQuranDataMap,
+      { lemma: false, root: false, subject: true },
+      mockSubjectMap,
+      'rain',
+      undefined,
+      mockWordMap,
+      mockMorphologyMap,
+    ).map((r) => r.gid);
+
+    // gid 3 contains السماوات and الارض but no standalone water token.
+    expect(gids).not.toContain(3);
+  });
+
+  it('matches رياح through its definite-article form الرياح', () => {
+    const result = performSubjectSearch(
+      'wind',
+      mockQuranDataMap,
+      { lemma: false, root: false, subject: true },
+      mockSubjectMap,
+      'wind',
+      undefined,
+      mockWordMap,
+      mockMorphologyMap,
+    );
+
+    expect(result.map((r) => r.gid)).toContain(2);
+    expect(result.find((r) => r.gid === 2)?.matchedTokens).toContain('رياح');
+  });
+
+  it('reports only the subject words that actually matched the verse', () => {
+    const result = performSubjectSearch(
+      'weather',
+      mockQuranDataMap,
+      { lemma: false, root: false, subject: true },
+      mockSubjectMap,
+      'weather',
+      undefined,
+      mockWordMap,
+      mockMorphologyMap,
+    );
+
+    const verse = result.find((r) => r.gid === 2);
+    expect(verse?.matchedTokens).toEqual(['رياح']);
+    expect(verse?.matchScore).toBe(4);
   });
 });

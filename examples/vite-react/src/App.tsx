@@ -132,7 +132,7 @@ function App() {
             setPhoneticMap(phonetic);
 
             const buildStart = performance.now();
-            const index = buildInvertedIndex(morphology, data, semantic, subject);
+            const index = buildInvertedIndex(morphology, data, semantic, subject, dictionary);
             const buildMs = performance.now() - buildStart;
 
             if (!cancelled) {
@@ -148,7 +148,7 @@ function App() {
           }
         } else {
           // When using worker, still build index for stats display
-          const [data, morphology, , semantic, phonetic, subject] = await Promise.all([
+          const [data, morphology, dictionary, semantic, phonetic, subject] = await Promise.all([
             loadQuranData(),
             loadMorphology(),
             loadWordMap(),
@@ -161,7 +161,7 @@ function App() {
             setSubjectMap(subject);
 
             const buildStart = performance.now();
-            const index = buildInvertedIndex(morphology, data, semantic, subject);
+            const index = buildInvertedIndex(morphology, data, semantic, subject, dictionary);
             const buildMs = performance.now() - buildStart;
 
             setIndexStats({

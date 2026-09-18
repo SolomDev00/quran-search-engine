@@ -1,26 +1,17 @@
 import { normalizeArabic, isArabic } from '../../utils/normalization';
+import { expandAffixVariants } from '../../utils/arabic-affixes';
 import type {
   VerseInput,
   ScoredVerse,
   AdvancedSearchOptions,
   InvertedIndex,
-  SubjectIndex,
+  MorphologyAya,
+  WordMap,
 } from '../../types';
 
-/** Resolve a raw query string to matched Arabic words and subject keys. */
-const resolveQuery = (
-  rawQuery: string,
-  subjectMap: Map<string, string[]>,
-): {
-  matchedArabicWords: Set<string>;
-  matchedSubjects: string[];
-  directArabicWords: Set<string>;
-} => {
+/** Resolve a raw query string to the set of Arabic words it stands for. */
+const resolveQuery = (rawQuery: string, subjectMap: Map<string, string[]>): Set<string> => {
   const matchedArabicWords = new Set<string>();
-  const matchedSubjects: string[] = [];
-  // Arabic typed straight into the query, i.e. not resolved through a subject key.
-  // These are not covered by subjectIndex, so the indexed path resolves them separately.
-  const directArabicWords = new Set<string>();
 
   // Try the full query as a phrase key first — resolves multi-word aliases
   // like "eternal life", "judgment day", "blazing fire".
@@ -30,7 +21,6 @@ const resolveQuery = (
     .trim();
   if (fullPhrase && subjectMap.has(fullPhrase)) {
     subjectMap.get(fullPhrase)?.forEach((w) => matchedArabicWords.add(w));
-    matchedSubjects.push(fullPhrase);
   }
 
   for (const token of rawQuery.split(/\s+/)) {
@@ -40,10 +30,8 @@ const resolveQuery = (
       const subjectWords = subjectMap.get(normalized);
       if (subjectWords) {
         subjectWords.forEach((w) => matchedArabicWords.add(w));
-        matchedSubjects.push(normalized);
       } else {
         matchedArabicWords.add(normalized);
-        directArabicWords.add(normalized);
       }
       continue;
     }
@@ -56,27 +44,106 @@ const resolveQuery = (
     const subjectWords = subjectMap.get(cleanToken);
     if (subjectWords) {
       subjectWords.forEach((w) => matchedArabicWords.add(w));
-      matchedSubjects.push(cleanToken);
     }
   }
 
-  return { matchedArabicWords, matchedSubjects, directArabicWords };
+  return matchedArabicWords;
 };
 
-/** Score a single verse against the matched Arabic words, respecting range filters. */
+/**
+ * The three ways a subject word is allowed to match a verse.
+ *
+ * Both the indexed and the scan path evaluate exactly these rules against exactly the same
+ * source data — `rootIndex`/`lemmaIndex` are built from `morphologyMap`, and `wordIndex` is
+ * built from the same normalized verse tokens the scan path splits — so the two paths agree
+ * by construction rather than by coincidence.
+ *
+ * 1. Shared root: `مطر` carries root `م-ط-ر`, which also covers `وأمطرنا` and `ممطرنا`.
+ * 2. Shared lemma: the word is the verse's own dictionary form.
+ * 3. Clitic variant: the word appears as a whole token once particles are attached (`الرياح`).
+ *
+ * Substring containment is deliberately *not* one of them: it would match `ماء` inside
+ * `سماء` and `اب` inside `كتاب`, which pulled roughly a fifth of the Quran into unrelated
+ * subjects.
+ */
+export type SubjectWordResolver = {
+  /** Root registered for the word, if the morphology knows one. */
+  root?: string;
+  /** Surface tokens the word can legitimately appear as. */
+  variants: Set<string>;
+};
+
+const buildResolvers = (
+  words: Set<string>,
+  wordMap?: WordMap,
+): Map<string, SubjectWordResolver> => {
+  const resolvers = new Map<string, SubjectWordResolver>();
+  for (const word of words) {
+    resolvers.set(word, {
+      root: wordMap?.get(word)?.root,
+      variants: new Set(expandAffixVariants(word)),
+    });
+  }
+  return resolvers;
+};
+
+/**
+ * Map every matching verse GID to the subject words that matched it.
+ *
+ * Uses the inverted index when one is supplied and falls back to a full scan otherwise;
+ * both branches apply the rules documented on {@link SubjectWordResolver}.
+ */
+export const collectSubjectHits = (
+  words: Set<string>,
+  quranData: Map<number, VerseInput>,
+  wordMap?: WordMap,
+  morphologyMap?: Map<number, MorphologyAya>,
+  invertedIndex?: InvertedIndex,
+): Map<number, string[]> => {
+  const hits = new Map<number, string[]>();
+  const add = (gid: number, word: string): void => {
+    const matched = hits.get(gid);
+    if (!matched) hits.set(gid, [word]);
+    else if (!matched.includes(word)) matched.push(word);
+  };
+
+  const resolvers = buildResolvers(words, wordMap);
+
+  if (invertedIndex) {
+    for (const [word, { root, variants }] of resolvers) {
+      if (root) invertedIndex.rootIndex.get(root)?.forEach((gid) => add(gid, word));
+      invertedIndex.lemmaIndex.get(word)?.forEach((gid) => add(gid, word));
+      for (const variant of variants) {
+        invertedIndex.wordIndex.get(variant)?.forEach((gid) => add(gid, word));
+      }
+    }
+    return hits;
+  }
+
+  for (const verse of quranData.values()) {
+    const morph = morphologyMap?.get(verse.gid);
+    const tokens = normalizeArabic(verse.standard).split(/\s+/);
+    for (const [word, { root, variants }] of resolvers) {
+      const matches =
+        (root !== undefined && morph?.roots?.includes(root)) ||
+        morph?.lemmas?.includes(word) ||
+        tokens.some((token) => variants.has(token));
+      if (matches) add(verse.gid, word);
+    }
+  }
+
+  return hits;
+};
+
+/** Apply the scope filters and turn a verse plus its matched words into a scored result. */
 const scoreVerse = <TVerse extends VerseInput>(
   verse: TVerse,
   options: AdvancedSearchOptions,
-  matchedArabicWords: Set<string>,
+  matchedKeywords: string[],
 ): ScoredVerse<TVerse> | null => {
   if (options.suraId && verse.sura_id !== options.suraId) return null;
   if (options.juzId && verse.juz_id !== options.juzId) return null;
   if (options.suraName && verse.sura_name !== options.suraName) return null;
-
-  const normalizedVerse = normalizeArabic(verse.standard);
-  const matchedKeywords = Array.from(matchedArabicWords).filter((w) => normalizedVerse.includes(w));
-
-  if (matchedKeywords.length === 0) return null;
 
   return {
     ...verse,
@@ -86,63 +153,6 @@ const scoreVerse = <TVerse extends VerseInput>(
   };
 };
 
-/**
- * Collect the GIDs of every verse containing one of `words` as a substring.
- *
- * `wordIndex` keys are the normalized, whitespace-delimited tokens of each verse, so a
- * whitespace-free needle occurs in a verse if and only if it occurs inside one of its
- * tokens. Testing `token.includes(word)` therefore selects exactly the same verses as the
- * scan path's `normalizedVerse.includes(word)` — that is what keeps prefixed forms such as
- * `وامطرنا` matching the bare word `مطر` on both paths.
- */
-const collectSubstringGids = (
-  words: Set<string>,
-  wordIndex: Map<string, Set<number>>,
-): Set<number> => {
-  const gids = new Set<number>();
-  for (const [token, tokenGids] of wordIndex) {
-    for (const word of words) {
-      if (token.includes(word)) {
-        tokenGids.forEach((gid) => gids.add(gid));
-        break;
-      }
-    }
-  }
-  return gids;
-};
-
-/** Collect scored verse candidates via the pre-built subjectIndex (fast path). */
-const collectFromIndex = <TVerse extends VerseInput>(
-  matchedSubjects: string[],
-  matchedArabicWords: Set<string>,
-  directArabicWords: Set<string>,
-  quranData: Map<number, TVerse>,
-  options: AdvancedSearchOptions,
-  subjectIndex: SubjectIndex,
-  wordIndex: Map<string, Set<number>>,
-): ScoredVerse<TVerse>[] => {
-  const matchedGids = new Set<number>();
-
-  // subjectIndex is itself built with substring matching, so subject keys are already
-  // in parity with the scan path.
-  for (const subject of matchedSubjects) {
-    subjectIndex.get(subject)?.forEach((gid) => matchedGids.add(gid));
-  }
-  // Arabic entered directly has no subjectIndex entry; resolve it through wordIndex.
-  if (directArabicWords.size > 0) {
-    collectSubstringGids(directArabicWords, wordIndex).forEach((gid) => matchedGids.add(gid));
-  }
-
-  const results: ScoredVerse<TVerse>[] = [];
-  for (const gid of matchedGids) {
-    const verse = quranData.get(gid);
-    if (!verse) continue;
-    const scored = scoreVerse(verse, options, matchedArabicWords);
-    if (scored) results.push(scored);
-  }
-  return results;
-};
-
 export const performSubjectSearch = <TVerse extends VerseInput>(
   query: string,
   quranData: Map<number, TVerse>,
@@ -150,34 +160,32 @@ export const performSubjectSearch = <TVerse extends VerseInput>(
   subjectMap?: Map<string, string[]>,
   originalQuery?: string,
   invertedIndex?: InvertedIndex,
+  wordMap?: WordMap,
+  morphologyMap?: Map<number, MorphologyAya>,
 ): ScoredVerse<TVerse>[] => {
   if (!options.subject || !subjectMap) return [];
 
-  const { matchedArabicWords, matchedSubjects, directArabicWords } = resolveQuery(
-    (originalQuery ?? query).trim(),
-    subjectMap,
-  );
+  const matchedArabicWords = resolveQuery((originalQuery ?? query).trim(), subjectMap);
 
   if (matchedArabicWords.size === 0) return [];
 
-  const subjectIndex = invertedIndex?.subjectIndex;
+  // Resolution is keyed on the words themselves, never on `invertedIndex.subjectIndex`. That
+  // index is a per-subject GID cache for consumers browsing a whole theme; consulting it here
+  // would reintroduce two sources of truth for the same question, which is precisely how the
+  // indexed and scan paths drifted apart before.
+  const hits = collectSubjectHits(
+    matchedArabicWords,
+    quranData,
+    wordMap,
+    morphologyMap,
+    invertedIndex,
+  );
 
-  if (invertedIndex && subjectIndex) {
-    return collectFromIndex(
-      matchedSubjects,
-      matchedArabicWords,
-      directArabicWords,
-      quranData,
-      options,
-      subjectIndex,
-      invertedIndex.wordIndex,
-    );
-  }
-
-  // Slow path: scan all verses
   const results: ScoredVerse<TVerse>[] = [];
-  for (const verse of quranData.values()) {
-    const scored = scoreVerse(verse, options, matchedArabicWords);
+  for (const [gid, matchedKeywords] of hits) {
+    const verse = quranData.get(gid);
+    if (!verse) continue;
+    const scored = scoreVerse(verse, options, matchedKeywords);
     if (scored) results.push(scored);
   }
   return results;
