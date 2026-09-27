@@ -87,11 +87,60 @@ const buildResolvers = (
   return resolvers;
 };
 
+const addHit = (hits: Map<number, string[]>, gid: number, word: string): void => {
+  const matched = hits.get(gid);
+  if (!matched) hits.set(gid, [word]);
+  else if (!matched.includes(word)) matched.push(word);
+};
+
+const collectIndexedHits = (
+  resolvers: Map<string, SubjectWordResolver>,
+  invertedIndex: InvertedIndex,
+): Map<number, string[]> => {
+  const hits = new Map<number, string[]>();
+  for (const [word, { root, variants }] of resolvers) {
+    if (root) invertedIndex.rootIndex.get(root)?.forEach((gid) => addHit(hits, gid, word));
+    invertedIndex.lemmaIndex.get(word)?.forEach((gid) => addHit(hits, gid, word));
+    for (const variant of variants) {
+      invertedIndex.wordIndex.get(variant)?.forEach((gid) => addHit(hits, gid, word));
+    }
+  }
+  return hits;
+};
+
+/** Whether `word` (via its resolver) matches the given verse's root, lemma, or surface tokens. */
+const resolverMatchesVerse = (
+  word: string,
+  { root, variants }: SubjectWordResolver,
+  tokens: string[],
+  morph?: MorphologyAya,
+): boolean => {
+  if (root !== undefined && morph?.roots?.includes(root)) return true;
+  if (morph?.lemmas?.includes(word)) return true;
+  return tokens.some((token) => variants.has(token));
+};
+
+const collectScanHits = (
+  resolvers: Map<string, SubjectWordResolver>,
+  quranData: Map<number, VerseInput>,
+  morphologyMap?: Map<number, MorphologyAya>,
+): Map<number, string[]> => {
+  const hits = new Map<number, string[]>();
+  for (const verse of quranData.values()) {
+    const morph = morphologyMap?.get(verse.gid);
+    const tokens = normalizeArabic(verse.standard).split(/\s+/);
+    for (const [word, resolver] of resolvers) {
+      if (resolverMatchesVerse(word, resolver, tokens, morph)) addHit(hits, verse.gid, word);
+    }
+  }
+  return hits;
+};
+
 /**
  * Map every matching verse GID to the subject words that matched it.
  *
  * Uses the inverted index when one is supplied and falls back to a full scan otherwise;
- * both branches apply the rules documented on {@link SubjectWordResolver}.
+ * both paths apply the rules documented on {@link SubjectWordResolver}.
  */
 export const collectSubjectHits = (
   words: Set<string>,
@@ -100,39 +149,9 @@ export const collectSubjectHits = (
   morphologyMap?: Map<number, MorphologyAya>,
   invertedIndex?: InvertedIndex,
 ): Map<number, string[]> => {
-  const hits = new Map<number, string[]>();
-  const add = (gid: number, word: string): void => {
-    const matched = hits.get(gid);
-    if (!matched) hits.set(gid, [word]);
-    else if (!matched.includes(word)) matched.push(word);
-  };
-
   const resolvers = buildResolvers(words, wordMap);
-
-  if (invertedIndex) {
-    for (const [word, { root, variants }] of resolvers) {
-      if (root) invertedIndex.rootIndex.get(root)?.forEach((gid) => add(gid, word));
-      invertedIndex.lemmaIndex.get(word)?.forEach((gid) => add(gid, word));
-      for (const variant of variants) {
-        invertedIndex.wordIndex.get(variant)?.forEach((gid) => add(gid, word));
-      }
-    }
-    return hits;
-  }
-
-  for (const verse of quranData.values()) {
-    const morph = morphologyMap?.get(verse.gid);
-    const tokens = normalizeArabic(verse.standard).split(/\s+/);
-    for (const [word, { root, variants }] of resolvers) {
-      const matches =
-        (root !== undefined && morph?.roots?.includes(root)) ||
-        morph?.lemmas?.includes(word) ||
-        tokens.some((token) => variants.has(token));
-      if (matches) add(verse.gid, word);
-    }
-  }
-
-  return hits;
+  if (invertedIndex) return collectIndexedHits(resolvers, invertedIndex);
+  return collectScanHits(resolvers, quranData, morphologyMap);
 };
 
 /** Apply the scope filters and turn a verse plus its matched words into a scored result. */

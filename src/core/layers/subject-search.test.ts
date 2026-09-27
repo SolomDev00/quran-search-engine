@@ -182,50 +182,67 @@ describe('Subject Search', () => {
   });
 });
 
-describe('Subject Search — indexed/scan parity', () => {
-  // gid 4 carries the prefixed form وامطرنا — a different whitespace-delimited token than the
-  // bare subject word مطر, and reachable only through the root they share. It is the case
-  // where an exact wordIndex lookup and a substring scan used to disagree.
-  const parityVerse: QuranText = {
-    gid: 4,
-    uthmani: 'وَأَمْطَرْنَا عَلَيْهِم مَّطَرًا',
-    standard: 'وامطرنا عليهم مطرا',
-    sura_id: 7,
-    aya_id: 84,
-    aya_id_display: '84',
-    page_id: 161,
-    juz_id: 8,
-    standard_full: 'وَأَمْطَرْنَا عَلَيْهِمْ مَطَرًا',
-    sura_name: 'الأعراف',
-    sura_name_en: 'The Heights',
-    sura_name_romanization: 'Al-Araf',
-  };
+// gid 4 carries the prefixed form وامطرنا — a different whitespace-delimited token than the
+// bare subject word مطر, and reachable only through the root they share. It is the case
+// where an exact wordIndex lookup and a substring scan used to disagree.
+const parityVerse: QuranText = {
+  gid: 4,
+  uthmani: 'وَأَمْطَرْنَا عَلَيْهِم مَّطَرًا',
+  standard: 'وامطرنا عليهم مطرا',
+  sura_id: 7,
+  aya_id: 84,
+  aya_id_display: '84',
+  page_id: 161,
+  juz_id: 8,
+  standard_full: 'وَأَمْطَرْنَا عَلَيْهِمْ مَطَرًا',
+  sura_name: 'الأعراف',
+  sura_name_en: 'The Heights',
+  sura_name_romanization: 'Al-Araf',
+};
 
-  const parityData = new Map([...mockQuranData, parityVerse].map((v) => [v.gid, v]));
-  const invertedIndex = buildInvertedIndex(
-    mockMorphologyMap,
+const parityData = new Map([...mockQuranData, parityVerse].map((v) => [v.gid, v]));
+const parityInvertedIndex = buildInvertedIndex(
+  mockMorphologyMap,
+  parityData,
+  undefined,
+  mockSubjectMap,
+  mockWordMap,
+);
+
+const gidsFor = (query: string, withIndex: boolean): number[] =>
+  search(
+    query,
+    {
+      quranData: parityData,
+      morphologyMap: mockMorphologyMap,
+      wordMap: mockWordMap,
+      subjectMap: mockSubjectMap,
+      ...(withIndex ? { invertedIndex: parityInvertedIndex } : {}),
+    },
+    { lemma: false, root: false, subject: true },
+  )
+    .results.filter((r: ScoredVerse) => r.matchType === 'subject')
+    .map((r: ScoredVerse) => r.gid)
+    .sort((a, b) => a - b);
+
+// Direct Arabic is exercised at the layer boundary: the full pipeline hands such a
+// query to the exact layer first, so the verse never reaches the result set tagged
+// as a subject match.
+const layerGids = (query: string, withIndex: boolean): number[] =>
+  performSubjectSearch(
+    query,
     parityData,
-    undefined,
+    { lemma: false, root: false, subject: true },
     mockSubjectMap,
+    query,
+    withIndex ? parityInvertedIndex : undefined,
     mockWordMap,
-  );
+    mockMorphologyMap,
+  )
+    .map((r) => r.gid)
+    .sort((a, b) => a - b);
 
-  const gidsFor = (query: string, withIndex: boolean): number[] =>
-    search(
-      query,
-      {
-        quranData: parityData,
-        morphologyMap: mockMorphologyMap,
-        wordMap: mockWordMap,
-        subjectMap: mockSubjectMap,
-        ...(withIndex ? { invertedIndex } : {}),
-      },
-      { lemma: false, root: false, subject: true },
-    )
-      .results.filter((r: ScoredVerse) => r.matchType === 'subject')
-      .map((r: ScoredVerse) => r.gid)
-      .sort((a, b) => a - b);
-
+describe('Subject Search — indexed/scan parity (search pipeline)', () => {
   it.each(['climate', 'weather', 'rain', 'wind'])(
     'returns identical results with and without invertedIndex for "%s"',
     (query) => {
@@ -233,23 +250,13 @@ describe('Subject Search — indexed/scan parity', () => {
     },
   );
 
-  // Direct Arabic is exercised at the layer boundary: the full pipeline hands such a
-  // query to the exact layer first, so the verse never reaches the result set tagged
-  // as a subject match.
-  const layerGids = (query: string, withIndex: boolean): number[] =>
-    performSubjectSearch(
-      query,
-      parityData,
-      { lemma: false, root: false, subject: true },
-      mockSubjectMap,
-      query,
-      withIndex ? invertedIndex : undefined,
-      mockWordMap,
-      mockMorphologyMap,
-    )
-      .map((r) => r.gid)
-      .sort((a, b) => a - b);
+  it('resolves a subject whose words only appear in prefixed form on both paths', () => {
+    expect(gidsFor('rain', false)).toContain(4);
+    expect(gidsFor('rain', true)).toContain(4);
+  });
+});
 
+describe('Subject Search — indexed/scan parity (layer)', () => {
   it('matches the prefixed form وامطرنا for the bare Arabic word مطر on both paths', () => {
     expect(layerGids('مطر', false)).toContain(4);
     expect(layerGids('مطر', true)).toContain(4);
@@ -262,11 +269,6 @@ describe('Subject Search — indexed/scan parity', () => {
       expect(layerGids(query, true)).toEqual(layerGids(query, false));
     },
   );
-
-  it('resolves a subject whose words only appear in prefixed form on both paths', () => {
-    expect(gidsFor('rain', false)).toContain(4);
-    expect(gidsFor('rain', true)).toContain(4);
-  });
 });
 
 describe('Subject Search — stem precision', () => {
