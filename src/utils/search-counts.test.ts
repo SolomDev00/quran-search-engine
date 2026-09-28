@@ -28,13 +28,14 @@ describe('buildSearchCounts', () => {
     expect(counts.total).toBe(3);
   });
 
-  it('tallies every layer including regex and range', () => {
+  it('tallies every layer including subject, regex and range', () => {
     const counts = buildSearchCounts([
       verse('exact'),
       verse('lemma'),
       verse('root'),
       verse('fuzzy'),
       verse('semantic'),
+      verse('subject'),
       verse('regex'),
       verse('range'),
     ]);
@@ -45,9 +46,10 @@ describe('buildSearchCounts', () => {
       root: 1,
       fuzzy: 1,
       semantic: 1,
+      subject: 1,
       regex: 1,
       range: 1,
-      total: 7,
+      total: 8,
     });
   });
 
@@ -58,6 +60,7 @@ describe('buildSearchCounts', () => {
       root: 0,
       fuzzy: 0,
       semantic: 0,
+      subject: 0,
       regex: 0,
       range: 0,
       total: 0,

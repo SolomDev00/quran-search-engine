@@ -98,6 +98,7 @@ const NO_COUNTS: SearchCounts = {
   fuzzy: 0,
   range: 0,
   semantic: 0,
+  subject: 0,
   regex: 0,
   total: 0,
 };
