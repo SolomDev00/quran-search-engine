@@ -51,6 +51,7 @@ export type SearchContext<TVerse extends VerseInput = QuranText> = {
   wordMap: WordMap;
   invertedIndex?: InvertedIndex;
   semanticMap?: Map<string, string[]>;
+  subjectMap?: Map<string, string[]>;
   phoneticMap?: Map<string, string[]>;
 };
 
@@ -62,6 +63,7 @@ export type MatchType =
   | 'range'
   | 'none'
   | 'semantic'
+  | 'subject'
   | 'regex';
 
 export type ScoredVerse<TVerse extends VerseInput = QuranText> = TVerse & {
@@ -84,10 +86,20 @@ export type AdvancedSearchOptions = {
   sura_name_en?: string;
   sura_name_romanization?: string;
   semantic?: boolean;
+  subject?: boolean;
 };
 
 export type SearchOptions = AdvancedSearchOptions;
 
+/**
+ * Per-layer match counts for a search response.
+ *
+ * Each field counts verses whose `matchType` equals the corresponding layer
+ * (`simple` counts `'exact'`). `fuzzy` counts only genuine fuzzy matches:
+ * verses that reached the result set without any layer claiming them
+ * (`matchType: 'none'`) appear in `total` only, so the per-type fields do not
+ * necessarily sum to `total`.
+ */
 export type SearchCounts = {
   simple: number;
   lemma: number;
@@ -95,6 +107,7 @@ export type SearchCounts = {
   fuzzy: number;
   range: number;
   semantic: number;
+  subject: number;
   regex: number;
   total: number;
 };
@@ -106,6 +119,31 @@ export type PaginationOptions = {
 
 export type SearchResponse<TVerse extends VerseInput = QuranText> = {
   results: ScoredVerse<TVerse>[];
+  counts: SearchCounts;
+  pagination: {
+    totalResults: number;
+    totalPages: number;
+    currentPage: number;
+    limit: number;
+  };
+};
+
+/** Ranking strategy for search()'s multi-term (string[]) results. */
+export type RankBy = 'score' | 'coverage' | 'frequency';
+
+export type MultiTermOptions = PaginationOptions & {
+  rankBy?: RankBy;
+};
+
+/** A verse matched by one or more independent term searches, with per-verse aggregation metadata. */
+export type MergedSearchResult<TVerse extends VerseInput = QuranText> = ScoredVerse<TVerse> & {
+  matchedTerms: string[];
+  distinctTermCount: number;
+  totalFrequency: number;
+};
+
+export type MultiTermResponse<TVerse extends VerseInput = QuranText> = {
+  results: MergedSearchResult<TVerse>[];
   counts: SearchCounts;
   pagination: {
     totalResults: number;
@@ -162,12 +200,16 @@ export type RootIndex = Map<string, Set<number>>;
 /** Normalized word string → Set of verse GIDs containing that word */
 export type WordIndex = Map<string, Set<number>>;
 
+/** Normalized subject/theme string → Set of verse GIDs containing related lemmas */
+export type SubjectIndex = Map<string, Set<number>>;
+
 /** Container for all inverted indices */
 export type InvertedIndex = {
   lemmaIndex: LemmaIndex;
   rootIndex: RootIndex;
   wordIndex: WordIndex;
   semanticIndex?: Map<string, Set<number>>;
+  subjectIndex?: SubjectIndex;
 };
 
 /** Boolean query object for booleanSearch() **/

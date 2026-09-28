@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   loadQuranData,
   loadMorphology,
   loadWordMap,
   loadSemanticData,
   loadPhoneticData,
+  loadSubjectData,
   buildInvertedIndex,
   search,
   LRUCache,
@@ -15,6 +16,8 @@ import {
   type WordMap,
   type InvertedIndex,
   type SearchResponse,
+  type MultiTermResponse,
+  type RankBy,
   type SearchWorkerClient,
 } from 'quran-search-engine';
 import { Search, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -40,6 +43,7 @@ function App() {
   const [morphologyMap, setMorphologyMap] = useState<Map<number, MorphologyAya> | null>(null);
   const [wordMap, setWordMap] = useState<WordMap | null>(null);
   const [semanticMap, setSemanticMap] = useState<Map<string, string[]> | null>(null);
+  const [subjectMap, setSubjectMap] = useState<Map<string, string[]> | null>(null);
   const [phoneticMap, setPhoneticMap] = useState<Map<string, string[]> | null>(null);
   const [invertedIndex, setInvertedIndex] = useState<InvertedIndex | null>(null);
   const [indexStats, setIndexStats] = useState<{
@@ -58,7 +62,19 @@ function App() {
   const [query, setQuery] = useState('');
   const debouncedQuery = useDebounce(query, 300);
 
+  // Multi-term mode is auto-detected from the input: any 2+ whitespace-
+  // separated words dispatch to search()'s array overload (independent
+  // per-term search merged by gid); a single word goes through the normal
+  // single-query path. Memoized so `terms` keeps a stable reference across
+  // renders that don't change debouncedQuery — it's shared with the search
+  // effect below and included in that effect's own dependency array.
+  const terms = useMemo(() => debouncedQuery.split(/\s+/).filter(Boolean), [debouncedQuery]);
+  const isMultiTerm = terms.length > 1;
+  const singleQuery = terms[0] ?? debouncedQuery;
+
   const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(null);
+  const [rankBy, setRankBy] = useState<RankBy>('score');
+  const [multiTermResponse, setMultiTermResponse] = useState<MultiTermResponse | null>(null);
 
   const [options, setOptions] = useState({
     lemma: true,
@@ -66,6 +82,7 @@ function App() {
     fuzzy: true,
     isRegex: false,
     semantic: true,
+    subject: false,
     suraId: undefined as number | undefined,
     juzId: undefined as number | undefined,
     suraName: '',
@@ -98,22 +115,24 @@ function App() {
         }
 
         if (!workerClient.current) {
-          const [data, morphology, dictionary, semantic, phonetic] = await Promise.all([
+          const [data, morphology, dictionary, semantic, phonetic, subject] = await Promise.all([
             loadQuranData(),
             loadMorphology(),
             loadWordMap(),
             loadSemanticData(),
             loadPhoneticData(),
+            loadSubjectData(),
           ]);
           if (!cancelled) {
             setQuranData(data);
             setMorphologyMap(morphology);
             setWordMap(dictionary);
             setSemanticMap(semantic);
+            setSubjectMap(subject);
             setPhoneticMap(phonetic);
 
             const buildStart = performance.now();
-            const index = buildInvertedIndex(morphology, data, semantic);
+            const index = buildInvertedIndex(morphology, data, semantic, subject, dictionary);
             const buildMs = performance.now() - buildStart;
 
             if (!cancelled) {
@@ -129,17 +148,20 @@ function App() {
           }
         } else {
           // When using worker, still build index for stats display
-          const [data, morphology, , semantic, phonetic] = await Promise.all([
+          const [data, morphology, dictionary, semantic, phonetic, subject] = await Promise.all([
             loadQuranData(),
             loadMorphology(),
             loadWordMap(),
             loadSemanticData(),
             loadPhoneticData(),
+            loadSubjectData(),
           ]);
 
           if (!cancelled) {
+            setSubjectMap(subject);
+
             const buildStart = performance.now();
-            const index = buildInvertedIndex(morphology, data, semantic);
+            const index = buildInvertedIndex(morphology, data, semantic, subject, dictionary);
             const buildMs = performance.now() - buildStart;
 
             setIndexStats({
@@ -169,6 +191,7 @@ function App() {
   useEffect(() => {
     if (loading || !debouncedQuery.trim()) {
       setSearchResponse(null);
+      setMultiTermResponse(null);
       return;
     }
 
@@ -177,11 +200,24 @@ function App() {
     if (workerClient.current) {
       setSearching(true);
       setUsingWorker(true);
-      workerClient.current
-        .runSearch(debouncedQuery, options, { page: currentPage, limit: PAGE_SIZE })
-        .then((res) => {
-          if (!cancelled) setSearchResponse(res);
-        })
+      const request = isMultiTerm
+        ? workerClient.current
+            .runSearchMany(terms, options, { page: currentPage, limit: PAGE_SIZE, rankBy })
+            .then((res) => {
+              if (!cancelled) {
+                setMultiTermResponse(res);
+                setSearchResponse(null);
+              }
+            })
+        : workerClient.current
+            .runSearch(singleQuery, options, { page: currentPage, limit: PAGE_SIZE })
+            .then((res) => {
+              if (!cancelled) {
+                setSearchResponse(res);
+                setMultiTermResponse(null);
+              }
+            });
+      request
         .catch((err) => console.error('Worker search error:', err))
         .finally(() => {
           if (!cancelled) setSearching(false);
@@ -197,22 +233,41 @@ function App() {
     ) {
       setSearching(true);
       setUsingWorker(false);
-      const response = search(
-        debouncedQuery,
-        {
-          quranData,
-          morphologyMap,
-          wordMap,
-          semanticMap,
-          phoneticMap,
-          invertedIndex,
-        },
-        options,
-        { page: currentPage, limit: PAGE_SIZE },
-        undefined,
-        searchCache,
-      );
-      setSearchResponse(response);
+      const context = {
+        quranData,
+        morphologyMap,
+        wordMap,
+        semanticMap,
+        subjectMap: subjectMap ?? undefined,
+        phoneticMap,
+        invertedIndex,
+      };
+
+      if (isMultiTerm) {
+        // Array overload — terms: string[] dispatches to the multi-term path.
+        const response = search(
+          terms,
+          context,
+          options,
+          { page: currentPage, limit: PAGE_SIZE, rankBy },
+          undefined,
+          searchCache,
+        );
+        setMultiTermResponse(response);
+        setSearchResponse(null);
+      } else {
+        // String overload — the original single-query path, unchanged.
+        const response = search(
+          singleQuery,
+          context,
+          options,
+          { page: currentPage, limit: PAGE_SIZE },
+          undefined,
+          searchCache,
+        );
+        setSearchResponse(response);
+        setMultiTermResponse(null);
+      }
       setSearching(false);
     }
 
@@ -221,8 +276,12 @@ function App() {
     };
   }, [
     debouncedQuery,
+    terms,
+    isMultiTerm,
+    singleQuery,
     options,
     currentPage,
+    rankBy,
     quranData,
     morphologyMap,
     wordMap,
@@ -235,7 +294,9 @@ function App() {
   // Reset page when query or options change
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedQuery, options]);
+  }, [debouncedQuery, options, rankBy]);
+
+  const activeResponse = isMultiTerm ? multiTermResponse : searchResponse;
 
   if (loading) {
     return (
@@ -283,7 +344,7 @@ function App() {
         <div style={{ position: 'relative', flex: 1 }}>
           <input
             type="text"
-            placeholder="Search for a word (e.g., كتب, الله, رحم)..."
+            placeholder="Search for a word (e.g. كتب) — or several words for independent multi-term search (e.g. الله الرحمن)..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -296,6 +357,23 @@ function App() {
       </div>
 
       <div className="options-group">
+        {isMultiTerm && (
+          <label
+            className="option-item"
+            title="Multi-word input searches each term independently via search(terms: string[]) and merges results by verse gid"
+          >
+            Rank by:
+            <select
+              value={rankBy}
+              onChange={(e) => setRankBy(e.target.value as RankBy)}
+              style={{ marginLeft: '5px' }}
+            >
+              <option value="score">Score</option>
+              <option value="coverage">Coverage (distinct terms)</option>
+              <option value="frequency">Frequency (raw hits)</option>
+            </select>
+          </label>
+        )}
         <label className="option-item">
           <input
             type="checkbox"
@@ -327,6 +405,14 @@ function App() {
             onChange={(e) => setOptions({ ...options, semantic: e.target.checked })}
           />
           Semantic Search
+        </label>
+        <label className="option-item">
+          <input
+            type="checkbox"
+            checked={options.subject}
+            onChange={(e) => setOptions({ ...options, subject: e.target.checked })}
+          />
+          Subject Search
         </label>
         <label className="option-item">
           <input
@@ -387,55 +473,60 @@ function App() {
         </label>
       </div>
 
-      {searchResponse && (
+      {activeResponse && (
         <>
           <div className="results-info">
             <div className="results-count">
-              Found <strong>{searchResponse.pagination.totalResults}</strong> matches
-              {searchResponse.pagination.totalResults > 0 &&
-                ` (showing page ${searchResponse.pagination.currentPage} of ${searchResponse.pagination.totalPages})`}
+              Found <strong>{activeResponse.pagination.totalResults}</strong> matches
+              {activeResponse.pagination.totalResults > 0 &&
+                ` (showing page ${activeResponse.pagination.currentPage} of ${activeResponse.pagination.totalPages})`}
             </div>
             <div className="results-stats">
               <span className="stat-item">
                 <span className="indicator indicator-exact"></span>
                 <span className="stat-label">Exact:</span>
-                <span className="stat-value">{searchResponse.counts.simple}</span>
+                <span className="stat-value">{activeResponse.counts.simple}</span>
               </span>
               <span className="stat-item">
                 <span className="indicator indicator-lemma"></span>
                 <span className="stat-label">Lemma:</span>
-                <span className="stat-value">{searchResponse.counts.lemma}</span>
+                <span className="stat-value">{activeResponse.counts.lemma}</span>
               </span>
               <span className="stat-item">
                 <span className="indicator indicator-root"></span>
                 <span className="stat-label">Root:</span>
-                <span className="stat-value">{searchResponse.counts.root}</span>
+                <span className="stat-value">{activeResponse.counts.root}</span>
               </span>
               <span className="stat-item">
                 <span className="indicator indicator-fuzzy"></span>
                 <span className="stat-label">Fuzzy:</span>
-                <span className="stat-value">{searchResponse.counts.fuzzy}</span>
+                <span className="stat-value">{activeResponse.counts.fuzzy}</span>
               </span>
               <span className="stat-item">
                 <span className="indicator indicator-semantic"></span>
                 <span className="stat-label">Semantic:</span>
-                <span className="stat-value">{searchResponse.counts.semantic}</span>
+                <span className="stat-value">{activeResponse.counts.semantic}</span>
+              </span>
+              <span className="stat-item">
+                <span className="indicator indicator-semantic"></span>
+                <span className="stat-label">Subject:</span>
+                <span className="stat-value">{activeResponse.counts.subject}</span>
               </span>
               <span className="stat-item">
                 <span className="indicator indicator-semantic"></span>
                 <span className="stat-label">Range:</span>
-                <span className="stat-value">{searchResponse.counts.range}</span>
+                <span className="stat-value">{activeResponse.counts.range}</span>
               </span>
               <span className="stat-item">
                 <span className="indicator indicator-semantic"></span>
                 <span className="stat-label">Regex:</span>
-                <span className="stat-value">{searchResponse.counts.regex}</span>
+                <span className="stat-value">{activeResponse.counts.regex}</span>
               </span>
             </div>
           </div>
 
           <div className="results-list">
-            {searchResponse.results.map((verse) => (
+            {activeResponse.results.map((verse) => (
               <VerseItem
                 key={verse.gid}
                 verse={verse}
@@ -446,7 +537,7 @@ function App() {
             ))}
           </div>
 
-          {searchResponse.pagination.totalPages > 1 && (
+          {activeResponse.pagination.totalPages > 1 && (
             <div className="pagination-controls">
               <button
                 className="page-btn"
@@ -456,11 +547,11 @@ function App() {
                 <ChevronLeft size={20} />
               </button>
               <span>
-                Page {currentPage} of {searchResponse.pagination.totalPages}
+                Page {currentPage} of {activeResponse.pagination.totalPages}
               </span>
               <button
                 className="page-btn"
-                disabled={currentPage === searchResponse.pagination.totalPages}
+                disabled={currentPage === activeResponse.pagination.totalPages}
                 onClick={() => setCurrentPage(currentPage + 1)}
               >
                 <ChevronRight size={20} />

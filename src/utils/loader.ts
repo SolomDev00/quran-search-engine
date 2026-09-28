@@ -1,6 +1,26 @@
-import type { MorphologyAya, WordMap, QuranText, InvertedIndex } from '../types';
+import type { MorphologyAya, WordMap, QuranText, InvertedIndex, SubjectIndex } from '../types';
 import { normalizeArabic } from './normalization';
+import { expandAffixVariants } from './arabic-affixes';
 import { DataFileNotFoundError, DataParseError, DataSchemaInvalidError } from '../errors';
+
+const rethrowLoadError = (filePath: string, error: unknown): never => {
+  if (
+    error instanceof DataFileNotFoundError ||
+    error instanceof DataParseError ||
+    error instanceof DataSchemaInvalidError
+  ) {
+    throw error;
+  }
+  if (error instanceof Error) {
+    if (error.message.includes('Cannot find module') || error.message.includes('Failed to fetch')) {
+      throw new DataFileNotFoundError(filePath, error);
+    }
+    if (error.message.includes('JSON') || error.message.includes('parse')) {
+      throw new DataParseError(filePath, error);
+    }
+  }
+  throw new DataParseError(filePath, error);
+};
 
 /**
  * Lazily loads the Quran morphology data.
@@ -221,17 +241,27 @@ export const loadQuranData = async (): Promise<Map<number, QuranText>> => {
  * Note: Lemmas and roots in morphology.json are already normalized
  *
  * @param morphologyMap The morphology map (from loadMorphology).
+ * @param quranData The Quran text map (from loadQuranData).
+ * @param semanticMap Optional semantic map; supplying it builds `semanticIndex`.
+ * @param subjectMap Optional subject map (from loadSubjectData); supplying it builds `subjectIndex`.
+ * @param wordMap Optional word map (from loadWordMap). Lets subject words resolve through their
+ *   root, so `مطر` also covers `وأمطرنا`; without it subjects fall back to lemma and clitic matching.
  * @returns An InvertedIndex containing both lemmaIndex and rootIndex.
  */
 export const buildInvertedIndex = (
   morphologyMap: Map<number, MorphologyAya>,
   quranData: Map<number, QuranText>,
   semanticMap?: Map<string, string[]>,
+  subjectMap?: Map<string, string[]>,
+  wordMap?: WordMap,
 ): InvertedIndex => {
   const lemmaIndex = new Map<string, Set<number>>();
   const rootIndex = new Map<string, Set<number>>();
   const wordIndex = new Map<string, Set<number>>();
   const semanticIndex = semanticMap ? new Map<string, Set<number>>() : undefined;
+  const subjectIndex: SubjectIndex | undefined = subjectMap
+    ? new Map<string, Set<number>>()
+    : undefined;
 
   for (const morph of morphologyMap.values()) {
     const gid = morph.gid;
@@ -294,7 +324,32 @@ export const buildInvertedIndex = (
     }
   }
 
-  return { lemmaIndex, rootIndex, wordIndex, semanticIndex };
+  // Build subjectIndex: each subject key → union of GIDs for all its Arabic words.
+  //
+  // Resolution reuses the indices built above (root → lemma → clitic variant), exactly as
+  // performSubjectSearch does, so a subject's GID set is the union of its words' GID sets by
+  // construction. Earlier revisions re-scanned all ~6.2k verses per subject key with substring
+  // matching, which cost seconds and matched unrelated stems.
+  if (subjectMap && subjectIndex) {
+    for (const [key, words] of subjectMap.entries()) {
+      const gids = new Set<number>();
+      for (const rawWord of words) {
+        const word = normalizeArabic(rawWord);
+        if (!word) continue;
+        const root = wordMap?.get(word)?.root;
+        if (root) rootIndex.get(root)?.forEach((gid) => gids.add(gid));
+        lemmaIndex.get(word)?.forEach((gid) => gids.add(gid));
+        for (const variant of expandAffixVariants(word)) {
+          wordIndex.get(variant)?.forEach((gid) => gids.add(gid));
+        }
+      }
+      if (gids.size > 0) {
+        subjectIndex.set(key, gids);
+      }
+    }
+  }
+
+  return { lemmaIndex, rootIndex, wordIndex, semanticIndex, subjectIndex };
 };
 
 export const loadSemanticData = async (): Promise<Map<string, string[]>> => {
@@ -408,5 +463,53 @@ export const loadPhoneticData = async (): Promise<Map<string, string[]>> => {
     }
 
     throw new DataParseError(filePath, error);
+  }
+};
+
+interface SubjectConcept {
+  subject: string;
+  english: string[];
+  arabic: string[];
+}
+
+const buildSubjectMap = (subjectData: SubjectConcept[]): Map<string, string[]> => {
+  const map = new Map<string, string[]>();
+  const addWords = (key: string, words: string[]) => {
+    map.set(key, [...new Set([...(map.get(key) ?? []), ...words])]);
+  };
+  for (const concept of subjectData) {
+    const normalizedArabic = concept.arabic.map((w) => normalizeArabic(w)).filter(Boolean);
+    addWords(concept.subject.toLowerCase(), normalizedArabic);
+    for (const engWord of concept.english) {
+      const cleanWord = engWord
+        .toLowerCase()
+        .replace(/[^a-z\s]/g, '')
+        .trim();
+      if (cleanWord) {
+        addWords(cleanWord, normalizedArabic);
+      }
+    }
+  }
+  return map;
+};
+
+export const loadSubjectData = async (): Promise<Map<string, string[]>> => {
+  const filePath = '../data/subjects.json';
+
+  try {
+    const subjectModule = await import('../data/subjects.json');
+    const subjectData = (subjectModule.default || subjectModule) as SubjectConcept[];
+
+    if (!Array.isArray(subjectData)) {
+      throw new DataSchemaInvalidError(filePath, 'Expected an array of subject data');
+    }
+
+    if (subjectData.length === 0) {
+      throw new DataSchemaInvalidError(filePath, 'Subject data is empty');
+    }
+
+    return buildSubjectMap(subjectData);
+  } catch (error) {
+    return rethrowLoadError(filePath, error);
   }
 };

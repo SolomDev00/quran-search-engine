@@ -10,7 +10,10 @@ import { filterVerses, simpleSearch, simpleSearchOr } from './layers/simple-sear
 import { createArabicFuseSearch } from './layers/fuse-search';
 import { performAdvancedLinguisticSearch } from './layers/linguistic-search';
 import { performSemanticSearch } from './layers/semantic-search';
+import { performSubjectSearch } from './layers/subject-search';
+import { searchManyImpl } from './layers/search-many';
 import { computeScore } from '../utils/scoring';
+import { buildSearchCounts } from '../utils/search-counts';
 
 import type {
   AdvancedSearchOptions,
@@ -22,6 +25,8 @@ import type {
   VerseWithFuseMatches,
   BooleanQuery,
   SearchContext,
+  MultiTermOptions,
+  MultiTermResponse,
 } from '../types';
 import {
   clearBooleanOperators,
@@ -35,27 +40,61 @@ import {
  * Combines simple text search with linguistic (lemma/root) analysis and fuzzy fallback.
  * Results are scored, deduplicated, and sorted by relevance.
  * @param query - The user's input string.
- * @param quranData - The verse dataset.
- * @param morphologyMap - Morphological data for scoring.
- * @param wordMap - Dictionary for linguistic resolution.
+ * @param context - The verse dataset, morphology map, word map, and optional indexes.
  * @param options - Toggles for different search modes.
  * @param pagination - Page number and results per page.
- * @param preComputedFuseIndex - Optional pre-built fuzzy index.
+ * @param fuseIndex - Optional pre-built fuzzy index.
  * @param cache - Optional LRU cache for performance.
- * @param invertedIndex - Optional Pre-built word/lemma/root indexes.
  * @returns Paginated results with metadata and match counts.
  * @example
- * result = search("الحمد لله", quranData, morphologyMap, wordMap, options, { page: 1, limit: 10 }, undefined, searchCache)
+ * result = search("الحمد لله", context, options, { page: 1, limit: 10 }, undefined, searchCache)
  */
-export const search = <TVerse extends VerseInput>(
+export function search<TVerse extends VerseInput>(
   query: string,
   context: SearchContext<TVerse>,
-  options: AdvancedSearchOptions = { lemma: true, root: true },
-  pagination: PaginationOptions = { page: 1, limit: 20 },
+  options?: AdvancedSearchOptions,
+  pagination?: PaginationOptions,
   fuseIndex?: Fuse<TVerse>,
   cache?: LRUCache<string, SearchResponse<TVerse>>,
-): SearchResponse<TVerse> => {
-  const { quranData, morphologyMap, wordMap, invertedIndex, semanticMap, phoneticMap } = context;
+): SearchResponse<TVerse>;
+/**
+ * Searches for multiple terms independently and merges results by verse `gid`.
+ * Each term runs through the full `search()` pipeline separately (no OR-query rewriting),
+ * so lemma/root/semantic matching still operates on one term at a time as intended.
+ * @param query - Independent search terms, e.g. ["muhammad", "yunus", "ibrahim"].
+ * @param context - The same search context accepted by the string overload.
+ * @param options - Toggles for different search modes, forwarded to each term's search.
+ * @param multiTermOptions - Pagination plus a `rankBy` mode (`score` | `coverage` | `frequency`).
+ * @param fuseIndex - Optional pre-built fuzzy index, forwarded to each term's search.
+ * @param cache - Optional LRU cache, forwarded to each term's search.
+ * @returns Paginated, merged results with metadata and match counts.
+ * @example
+ * result = search(["محمد", "يونس"], context, options, { page: 1, limit: 10, rankBy: 'coverage' })
+ */
+export function search<TVerse extends VerseInput>(
+  query: string[],
+  context: SearchContext<TVerse>,
+  options?: AdvancedSearchOptions,
+  multiTermOptions?: MultiTermOptions,
+  fuseIndex?: Fuse<TVerse>,
+  cache?: LRUCache<string, SearchResponse<TVerse>>,
+): MultiTermResponse<TVerse>;
+export function search<TVerse extends VerseInput>(
+  query: string | string[],
+  context: SearchContext<TVerse>,
+  options: AdvancedSearchOptions = { lemma: true, root: true },
+  multiTermOptions: MultiTermOptions = {},
+  fuseIndex?: Fuse<TVerse>,
+  cache?: LRUCache<string, SearchResponse<TVerse>>,
+): SearchResponse<TVerse> | MultiTermResponse<TVerse> {
+  if (Array.isArray(query)) {
+    return searchManyImpl(search, query, context, options, multiTermOptions, fuseIndex, cache);
+  }
+
+  const pagination: PaginationOptions = multiTermOptions;
+
+  const { quranData, morphologyMap, wordMap, invertedIndex, semanticMap, subjectMap, phoneticMap } =
+    context;
 
   // Validate required dependencies
   if (!quranData || !(quranData instanceof Map) || quranData.size === 0) {
@@ -111,6 +150,7 @@ export const search = <TVerse extends VerseInput>(
         root: 0,
         fuzzy: 0,
         semantic: 0,
+        subject: 0,
         regex: 0,
         range: totalResults,
         total: totalResults,
@@ -136,6 +176,7 @@ export const search = <TVerse extends VerseInput>(
         root: 0,
         fuzzy: 0,
         semantic: 0,
+        subject: 0,
         regex: totalResults,
         range: 0,
         total: totalResults,
@@ -202,10 +243,24 @@ export const search = <TVerse extends VerseInput>(
     .split(/\s+/)
     .some((token) => !isArabic(token) && token.trim().length > 0);
 
-  if (!cleanQuery && !(options.semantic && hasEnglishWords)) {
+  if (
+    !cleanQuery &&
+    !(options.semantic && hasEnglishWords) &&
+    !(options.subject && hasEnglishWords)
+  ) {
     return {
       results: [],
-      counts: { simple: 0, lemma: 0, root: 0, fuzzy: 0, range: 0, total: 0, semantic: 0, regex: 0 },
+      counts: {
+        simple: 0,
+        lemma: 0,
+        root: 0,
+        fuzzy: 0,
+        range: 0,
+        total: 0,
+        semantic: 0,
+        subject: 0,
+        regex: 0,
+      },
       pagination: {
         totalResults: 0,
         totalPages: 0,
@@ -246,10 +301,22 @@ export const search = <TVerse extends VerseInput>(
     invertedIndex,
   );
 
+  const subjectMatches = performSubjectSearch(
+    cleanQuery,
+    quranData,
+    options,
+    subjectMap,
+    operatorFreeQuery,
+    invertedIndex,
+    wordMap,
+    morphologyMap,
+  );
+
   // 6. Boolean filtering (if boolean operators were present in query)
 
-  // Combine all three search layers (simple, advanced, and semantic) into a single array
-  const combinedMatches = [...simpleMatches, ...advancedMatches, ...semanticMatches];
+
+  // Combine all four search layers (simple, advanced,semantic, and subject) into a single array
+  const combinedMatches = [...simpleMatches, ...advancedMatches, ...semanticMatches, ...subjectMatches];
 
   // Create a Map to store unique verses using the verse ID (gid) as the key
   const verseMap = new Map<number, TVerse>();
@@ -269,6 +336,7 @@ export const search = <TVerse extends VerseInput>(
   // Pass the clean, deduplicated verses array to filter them by sura or juz options
   const allMatches = filterVerses(versesArrOfObj, options.suraId, options.juzId, options.suraName);
 
+
   // Then, if boolean query exists, filter combined results based on boolean logic
   // This allows queries like "+الله -الرحمن الرحيم | العليم" to:
   // 1. Search for all terms (الله, الرحمن, الرحيم, العليم) using all search layers
@@ -284,8 +352,11 @@ export const search = <TVerse extends VerseInput>(
     if (!gidSet.has(verse.gid)) {
       gidSet.add(verse.gid);
 
-      // If it's a semantic match (already scored), preserve it
-      if ('matchType' in verse && verse['matchType'] === 'semantic') {
+      // If it's a pre-scored match (semantic/subject), preserve it
+      if (
+        'matchType' in verse &&
+        (verse['matchType'] === 'semantic' || verse['matchType'] === 'subject')
+      ) {
         combined.push(verse as ScoredVerse<TVerse>);
         continue;
       }
@@ -309,16 +380,7 @@ export const search = <TVerse extends VerseInput>(
   const totalResults = combined.length;
   const totalPages = Math.ceil(totalResults / limit);
 
-  const counts: SearchCounts = {
-    simple: combined.filter((v) => v.matchType === 'exact').length,
-    lemma: combined.filter((v) => v.matchType === 'lemma').length,
-    root: combined.filter((v) => v.matchType === 'root').length,
-    fuzzy: combined.filter((v) => v.matchType === 'none' || v.matchType === 'fuzzy').length,
-    semantic: combined.filter((v) => v.matchType === 'semantic').length,
-    regex: 0,
-    range: 0,
-    total: combined.length,
-  };
+  const counts: SearchCounts = buildSearchCounts(combined);
 
   const response: SearchResponse<TVerse> = {
     results,
@@ -336,4 +398,4 @@ export const search = <TVerse extends VerseInput>(
   }
 
   return response;
-};
+}

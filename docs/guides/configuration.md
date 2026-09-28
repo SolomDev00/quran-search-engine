@@ -1,6 +1,7 @@
 # Search Configuration
 
-The main `search` function accepts two optional configuration layers allowing fine-tuned control over behavior and pagination limits.
+The main `search` function accepts two optional configuration layers allowing fine-tuned control over behavior and
+pagination limits.
 
 ## `SearchOptions`
 
@@ -16,6 +17,7 @@ export type AdvancedSearchOptions = {
   fuzzy?: boolean; // Default: true
   isRegex?: boolean;
   semantic?: boolean;
+  subject?: boolean;
 
   // Optional geographic filtering parameters
   suraId?: number;
@@ -28,9 +30,25 @@ export type AdvancedSearchOptions = {
 export type SearchOptions = AdvancedSearchOptions;
 ```
 
-- **Fuzzy Matching:** By default `fuzzy` is allowed to fallback if exact/lemma/root checks fail. Pass `{ fuzzy: false }` to strictly enforce absolute dict matches.
-- **Regex Search:** Passing `{ isRegex: true }` processes the query as a regular expression instead of standard token matching. The pattern is validated for syntactic correctness and checked against known ReDoS-prone patterns (nested quantifiers, overlapping alternation) before execution. Throws `InvalidRegexError` for invalid or unsafe patterns. Regex search bypasses all linguistic pipelines (lemma, root, fuzzy) and matches directly against the normalized `standard` text field. Can be combined with `suraId`, `juzId`, or `suraName` to narrow the search scope.
-- **Semantic Search:** Enable `{ semantic: true }` to integrate with AI embeddings conditionally if valid data map shapes are configured.
+- **Fuzzy Matching:** By default `fuzzy` is allowed to fallback if exact/lemma/root checks fail. Pass `{ fuzzy: false }`
+  to strictly enforce absolute dict matches.
+- **Regex Search:** Passing `{ isRegex: true }` processes the query as a regular expression instead of standard token
+  matching. The pattern is validated for syntactic correctness and checked against known ReDoS-prone patterns (nested
+  quantifiers, overlapping alternation) before execution. Throws `InvalidRegexError` for invalid or unsafe patterns.
+  Regex search bypasses all linguistic pipelines (lemma, root, fuzzy) and matches directly against the normalized
+  `standard` text field. Can be combined with `suraId`, `juzId`, or `suraName` to narrow the search scope.
+- **Semantic Search:** Enable `{ semantic: true }` to integrate with AI embeddings conditionally if valid data map
+  shapes are configured.
+- **Subject Search:** Enable `{ subject: true }` to perform thematic search. Requires passing
+  `subjectMap` (loaded via `loadSubjectData()`) in the search context. Maps English concept
+  words (e.g. `"climate"`, `"worship"`) to curated Arabic words grouped by Islamic theme,
+  then searches for those words in the Quran. A word matches a verse when it shares the
+  verse's root, is one of its lemmas, or appears as a whole token once Arabic clitics are
+  attached (`الرياح` for `رياح`) — never by bare substring, which would match `ماء`
+  inside `سماء`. Root resolution requires `wordMap`, so pass it to `buildInvertedIndex` as
+  the fifth argument. The initial `src/data/subjects.json` seed covers 20 themes and is
+  designed to be expanded by contributors over time; write new entries in their base form
+  (`مطر`, not `أمطار`), since the root already covers the derived forms.
 - **Filtering Options:** Narrow searches spatially via explicit `{ suraId: 2, juzId: 3 }` etc.
 
 ## `PaginationOptions`

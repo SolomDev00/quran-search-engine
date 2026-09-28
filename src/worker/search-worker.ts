@@ -6,12 +6,19 @@ import {
   loadWordMap,
   loadSemanticData,
   loadPhoneticData,
+  loadSubjectData,
   buildInvertedIndex,
 } from '../utils/loader';
 import { search } from '../core/search';
 import { LRUCache } from '../utils/lru-cache';
 import type { QuranText, MorphologyAya, WordMap, SearchResponse, InvertedIndex } from '../types';
-import type { WorkerRequest, InitDataResponse, SearchResultResponse, ErrorResponse } from './types';
+import type {
+  WorkerRequest,
+  InitDataResponse,
+  SearchResultResponse,
+  SearchManyResultResponse,
+  ErrorResponse,
+} from './types';
 
 // ── Worker-scoped state ────────────────────────────────────────
 
@@ -20,12 +27,19 @@ let morphologyMap: Map<number, MorphologyAya> | null = null;
 let wordMap: WordMap | null = null;
 let semanticMap: Map<string, string[]> | null = null;
 let phoneticMap: Map<string, string[]> | null = null;
+let subjectMap: Map<string, string[]> | null = null;
 let invertedIndex: InvertedIndex | null = null;
 const cache = new LRUCache<string, SearchResponse<QuranText>>(100);
 
 // ── Helpers ────────────────────────────────────────────────────
 
-function postTyped(msg: InitDataResponse | SearchResultResponse<QuranText> | ErrorResponse): void {
+function postTyped(
+  msg:
+    | InitDataResponse
+    | SearchResultResponse<QuranText>
+    | SearchManyResultResponse<QuranText>
+    | ErrorResponse,
+): void {
   postMessage(msg);
 }
 
@@ -37,12 +51,13 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   switch (msg.type) {
     case 'INIT_DATA': {
       try {
-        const [qd, morph, wm, semMap, phonMap] = await Promise.all([
+        const [qd, morph, wm, semMap, phonMap, subjMap] = await Promise.all([
           loadQuranData(),
           loadMorphology(),
           loadWordMap(),
           loadSemanticData().catch(() => null),
           loadPhoneticData().catch(() => null),
+          loadSubjectData().catch(() => null),
         ]);
 
         quranData = qd;
@@ -50,7 +65,14 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
         wordMap = wm;
         semanticMap = semMap;
         phoneticMap = phonMap;
-        invertedIndex = buildInvertedIndex(morphologyMap, quranData, semanticMap ?? undefined);
+        subjectMap = subjMap;
+        invertedIndex = buildInvertedIndex(
+          morphologyMap,
+          quranData,
+          semanticMap ?? undefined,
+          subjectMap ?? undefined,
+          wordMap ?? undefined,
+        );
 
         postTyped({
           type: 'INIT_DATA_RESULT',
@@ -90,6 +112,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
             invertedIndex: invertedIndex ?? undefined,
             semanticMap: semanticMap ?? undefined,
             phoneticMap: phoneticMap ?? undefined,
+            subjectMap: subjectMap ?? undefined,
           },
           msg.options,
           msg.pagination,
@@ -113,6 +136,53 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
       break;
     }
 
+    case 'RUN_SEARCH_MANY': {
+      const start = performance.now();
+
+      if (!quranData || !morphologyMap || !wordMap) {
+        postTyped({
+          type: 'ERROR',
+          requestId: msg.requestId,
+          error: 'Worker data not initialized. Call INIT_DATA first.',
+        });
+        return;
+      }
+
+      try {
+        // Array overload of search() — routes internally to the multi-term path.
+        const result = search(
+          msg.terms,
+          {
+            quranData,
+            morphologyMap,
+            wordMap,
+            invertedIndex: invertedIndex ?? undefined,
+            semanticMap: semanticMap ?? undefined,
+            phoneticMap: phoneticMap ?? undefined,
+            subjectMap: subjectMap ?? undefined,
+          },
+          msg.options,
+          msg.searchManyOptions,
+          undefined,
+          cache,
+        );
+
+        postTyped({
+          type: 'SEARCH_MANY_RESULT',
+          requestId: msg.requestId,
+          data: result,
+          timingMs: performance.now() - start,
+        });
+      } catch (err) {
+        postTyped({
+          type: 'ERROR',
+          requestId: msg.requestId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      break;
+    }
+
     case 'DISPOSE': {
       cache.clear();
       quranData = null;
@@ -120,6 +190,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
       wordMap = null;
       semanticMap = null;
       phoneticMap = null;
+      subjectMap = null;
       invertedIndex = null;
       self.close();
       break;

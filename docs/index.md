@@ -1,10 +1,12 @@
 # Quran Search Engine Documentation
 
-Welcome to the official documentation for **quran-search-engine**, a stateless, UI-agnostic Quran search engine for Arabic text written in pure TypeScript.
+Welcome to the official documentation for **quran-search-engine**, a stateless, UI-agnostic Quran search engine for
+Arabic text written in pure TypeScript.
 
 ## Introduction
 
-This library provides a deterministic and highly customizable search experience without being tied to any specific UI framework. You control the data, the UI rendering, and the persistence layer.
+This library provides a deterministic and highly customizable search experience without being tied to any specific UI
+framework. You control the data, the UI rendering, and the persistence layer.
 
 ### Core Features
 
@@ -13,6 +15,7 @@ This library provides a deterministic and highly customizable search experience 
 - Lemma & Root matching (via morphology and word maps)
 - Regular Expression search with ReDoS safety validation
 - Advanced Fuzzy fallback
+- Independent multi-term search (`search()` with an array of terms) with score/coverage/frequency ranking
 - Computed highlight ranges (UI-agnostic)
 
 ---
@@ -27,6 +30,7 @@ This library provides a deterministic and highly customizable search experience 
 
 ### Guides
 
+- [CLI](./guides/cli.md)
 - [Search Syntax & Scoring](./guides/search-syntax.md)
 - [Advanced Configuration](./guides/configuration.md)
 - [Examples & Integrations](./guides/examples.md)

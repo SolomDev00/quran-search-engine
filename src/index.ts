@@ -7,6 +7,7 @@ export {
   buildInvertedIndex,
   loadSemanticData,
   loadPhoneticData,
+  loadSubjectData,
 } from './utils/loader';
 export { normalizeArabic, removeTashkeel, isArabic } from './utils/normalization';
 
@@ -36,3 +37,4 @@ export {
 } from './worker';
 
 export { SURAS } from './utils/suras';
+export { exportResults, type ExportFormat } from './utils/export';
