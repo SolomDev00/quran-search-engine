@@ -202,7 +202,7 @@ export function search<TVerse extends VerseInput>(
     : null;
 
   // Remove boolean operators from query to extract clean search terms
-  // Example: "+الله | الرحمن -الجحيم" → "الله الرحمن الجحيم"
+  // Example: "+الله | الرحمن -الرحيم" → "الله الرحمن الرحيم"
   const operatorFreeQuery = clearBooleanOperators(query);
 
   // 4. Setup phase: Tokenize and handle phonetic translation
@@ -313,8 +313,29 @@ export function search<TVerse extends VerseInput>(
   );
 
   // 6. Boolean filtering (if boolean operators were present in query)
-  // First, combine all search results from different layers
-  const allMatches = [...simpleMatches, ...advancedMatches, ...semanticMatches, ...subjectMatches];
+
+
+  // Combine all four search layers (simple, advanced,semantic, and subject) into a single array
+  const combinedMatches = [...simpleMatches, ...advancedMatches, ...semanticMatches, ...subjectMatches];
+
+  // Create a Map to store unique verses using the verse ID (gid) as the key
+  const verseMap = new Map<number, TVerse>();
+
+  // Loop through all the combined verses one by one in order
+  for (const verse of combinedMatches) {
+    // Check if this verse ID is NOT already stored in the map
+    if (!verseMap.has(verse.gid)) {
+      // If it's not there, store it (this ensures "First-Match Wins" policy)
+      verseMap.set(verse.gid, verse);
+    }
+  }
+
+  // Convert the unique Map values back into a standard array of verse objects
+  const versesArrOfObj = Array.from(verseMap.values());
+
+  // Pass the clean, deduplicated verses array to filter them by sura or juz options
+  const allMatches = filterVerses(versesArrOfObj, options.suraId, options.juzId, options.suraName);
+
 
   // Then, if boolean query exists, filter combined results based on boolean logic
   // This allows queries like "+الله -الرحمن الرحيم | العليم" to:
