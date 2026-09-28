@@ -159,6 +159,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
             invertedIndex: invertedIndex ?? undefined,
             semanticMap: semanticMap ?? undefined,
             phoneticMap: phoneticMap ?? undefined,
+            subjectMap: subjectMap ?? undefined,
           },
           msg.options,
           msg.searchManyOptions,
