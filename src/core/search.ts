@@ -314,9 +314,13 @@ export function search<TVerse extends VerseInput>(
 
   // 6. Boolean filtering (if boolean operators were present in query)
 
-
   // Combine all four search layers (simple, advanced,semantic, and subject) into a single array
-  const combinedMatches = [...simpleMatches, ...advancedMatches, ...semanticMatches, ...subjectMatches];
+  const combinedMatches = [
+    ...simpleMatches,
+    ...advancedMatches,
+    ...semanticMatches,
+    ...subjectMatches,
+  ];
 
   // Create a Map to store unique verses using the verse ID (gid) as the key
   const verseMap = new Map<number, TVerse>();
@@ -335,7 +339,6 @@ export function search<TVerse extends VerseInput>(
 
   // Pass the clean, deduplicated verses array to filter them by sura or juz options
   const allMatches = filterVerses(versesArrOfObj, options.suraId, options.juzId, options.suraName);
-
 
   // Then, if boolean query exists, filter combined results based on boolean logic
   // This allows queries like "+الله -الرحمن الرحيم | العليم" to:

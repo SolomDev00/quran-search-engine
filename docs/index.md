@@ -32,6 +32,7 @@ framework. You control the data, the UI rendering, and the persistence layer.
 
 - [CLI](./guides/cli.md)
 - [Search Syntax & Scoring](./guides/search-syntax.md)
+- [Subject & Multi-Word Search](./guides/subjects-and-multiword.md)
 - [Advanced Configuration](./guides/configuration.md)
 - [Examples & Integrations](./guides/examples.md)
 - [English-Arabic Search](./guides/english-arabic-search.md)
