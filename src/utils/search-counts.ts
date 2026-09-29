@@ -22,6 +22,7 @@ export const buildSearchCounts = <T extends { matchType: MatchType }>(
   root: scored.filter((v) => v.matchType === 'root').length,
   fuzzy: scored.filter((v) => v.matchType === 'fuzzy').length,
   semantic: scored.filter((v) => v.matchType === 'semantic').length,
+  subject: scored.filter((v) => v.matchType === 'subject').length,
   regex: scored.filter((v) => v.matchType === 'regex').length,
   range: scored.filter((v) => v.matchType === 'range').length,
   total: scored.length,
