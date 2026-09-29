@@ -825,8 +825,9 @@ const response = search(
 
 For independent multi-term search — where each term is searched separately and results are merged
 and ranked — pass an array of strings instead. See the
-[Subject & Multi-Word Search guide](docs/guides/subjects-and-multiword.md) for full examples
-including AI-pipeline patterns, `rankBy` modes, and subject-based thematic search.
+[Subject & Multi-Word Search guide](docs/guides/subjects-and-multiword.md) for full examples,
+including feeding an LLM's expanded keyword list straight into `search()`, the `rankBy` ranking
+modes, and combining multi-word search with subject-based thematic search.
 
 ## Caching with LRUCache
 
