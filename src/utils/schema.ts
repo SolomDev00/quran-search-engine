@@ -357,6 +357,141 @@ export function validateSemanticData(data: unknown, limit = 50): ValidationResul
 }
 
 // ---------------------------------------------------------------------------
+// Subject data validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validates an array of subject (thematic) concept objects against the subjects.json schema.
+ *
+ * Each entry must have:
+ * - `subject` (string) – the theme's concept key, e.g. "weather".
+ * - `english` (string[]) – English aliases for the theme.
+ * - `arabic` (string[]) – Arabic words belonging to the theme.
+ *
+ * @param data  - The data to validate (expected: array of subject concept objects).
+ * @param limit - Maximum number of per-item errors to collect (default 50).
+ */
+export function validateSubjectData(data: unknown, limit = 50): ValidationResult {
+  const errors: SchemaError[] = [];
+
+  if (!Array.isArray(data)) {
+    return {
+      valid: false,
+      errors: [
+        {
+          path: 'root',
+          message: 'Expected an array of subject concept objects.',
+        },
+      ],
+    };
+  }
+
+  if (data.length === 0) {
+    return {
+      valid: false,
+      errors: [{ path: 'root', message: 'Subject data array must not be empty.' }],
+    };
+  }
+
+  for (let i = 0; i < data.length && errors.length < limit; i++) {
+    const entry = data[i] as Record<string, unknown>;
+    const p = `subjects[${i}]`;
+
+    if (entry === null || typeof entry !== 'object') {
+      errors.push({ path: p, message: 'Expected an object.' });
+      continue;
+    }
+
+    pushIf(
+      errors,
+      !isString(entry.subject),
+      `${p}.subject`,
+      'Required string field "subject" is missing or not a string.',
+      limit,
+    );
+
+    if (!Array.isArray(entry.english)) {
+      pushIf(
+        errors,
+        true,
+        `${p}.english`,
+        'Required field "english" must be an array of strings.',
+        limit,
+      );
+    } else if (entry.english.some((t: unknown) => !isString(t))) {
+      pushIf(errors, true, `${p}.english`, 'All items in "english" must be strings.', limit);
+    }
+
+    if (!Array.isArray(entry.arabic)) {
+      pushIf(
+        errors,
+        true,
+        `${p}.arabic`,
+        'Required field "arabic" must be an array of strings.',
+        limit,
+      );
+    } else if (entry.arabic.some((t: unknown) => !isString(t))) {
+      pushIf(errors, true, `${p}.arabic`, 'All items in "arabic" must be strings.', limit);
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+// ---------------------------------------------------------------------------
+// Phonetic data validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validates a phonetic-map object against the phonetic.json schema.
+ *
+ * Top-level keys are transliterated (Latin) spellings; each value must be a
+ * non-empty array of Arabic word strings.
+ *
+ * @param data  - The data to validate.
+ * @param limit - Maximum number of per-entry errors to collect (default 50).
+ */
+export function validatePhoneticData(data: unknown, limit = 50): ValidationResult {
+  const errors: SchemaError[] = [];
+
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    return {
+      valid: false,
+      errors: [
+        {
+          path: 'root',
+          message: 'Expected a plain object (transliteration → array of Arabic words).',
+        },
+      ],
+    };
+  }
+
+  const entries = Object.entries(data as Record<string, unknown>);
+
+  if (entries.length === 0) {
+    return {
+      valid: false,
+      errors: [{ path: 'root', message: 'Phonetic data must not be empty.' }],
+    };
+  }
+
+  for (let i = 0; i < entries.length && errors.length < limit; i++) {
+    const [key, val] = entries[i];
+    const p = `phonetic["${key}"]`;
+
+    pushIf(errors, key.trim() === '', p, 'Key must not be empty.', limit);
+
+    if (!Array.isArray(val)) {
+      pushIf(errors, true, p, 'Expected an array of Arabic word strings.', limit);
+    } else if (val.some((w: unknown) => !isString(w))) {
+      pushIf(errors, true, p, 'All items must be strings.', limit);
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+// ---------------------------------------------------------------------------
 // Convenience: format errors for logging
 // ---------------------------------------------------------------------------
 
