@@ -29,6 +29,21 @@ function pushIf(
   if (condition && errors.length < limit) errors.push({ path, message });
 }
 
+/** Validates that `value` is present, an array, and every item is a string. */
+function validateStringArrayField(
+  errors: SchemaError[],
+  value: unknown,
+  path: string,
+  fieldName: string,
+  limit: number,
+): void {
+  if (!Array.isArray(value)) {
+    pushIf(errors, true, path, `Required field "${fieldName}" must be an array of strings.`, limit);
+  } else if (value.some((item: unknown) => !isString(item))) {
+    pushIf(errors, true, path, `All items in "${fieldName}" must be strings.`, limit);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // QuranText / VerseInput validation
 // ---------------------------------------------------------------------------
@@ -410,29 +425,8 @@ export function validateSubjectData(data: unknown, limit = 50): ValidationResult
       limit,
     );
 
-    if (!Array.isArray(entry.english)) {
-      pushIf(
-        errors,
-        true,
-        `${p}.english`,
-        'Required field "english" must be an array of strings.',
-        limit,
-      );
-    } else if (entry.english.some((t: unknown) => !isString(t))) {
-      pushIf(errors, true, `${p}.english`, 'All items in "english" must be strings.', limit);
-    }
-
-    if (!Array.isArray(entry.arabic)) {
-      pushIf(
-        errors,
-        true,
-        `${p}.arabic`,
-        'Required field "arabic" must be an array of strings.',
-        limit,
-      );
-    } else if (entry.arabic.some((t: unknown) => !isString(t))) {
-      pushIf(errors, true, `${p}.arabic`, 'All items in "arabic" must be strings.', limit);
-    }
+    validateStringArrayField(errors, entry.english, `${p}.english`, 'english', limit);
+    validateStringArrayField(errors, entry.arabic, `${p}.arabic`, 'arabic', limit);
   }
 
   return { valid: errors.length === 0, errors };
